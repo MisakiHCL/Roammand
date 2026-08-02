@@ -359,3 +359,33 @@ jobs:
           chmod 640 infra/compose/secrets/*
       - name: Validate self-hosted Compose
         run: make test-m7-config
+
+  required:
+    name: Required checks
+    if: always()
+    needs:
+      - boundary-and-schema
+      - dart
+      - mobile-builds
+      - desktop-host
+      - m8-privileged-bridge
+      - rust
+      - go
+      - m7-recovery-privacy-fuzz
+      - self-hosting
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm every CI job passed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          unsuccessful="$(
+            jq -r \
+              'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' \
+              <<<"${JOB_RESULTS}"
+          )"
+          if [[ -n "${unsuccessful}" ]]; then
+            printf 'Required jobs did not pass:\n%s\n' "${unsuccessful}" >&2
+            exit 1
+          fi
