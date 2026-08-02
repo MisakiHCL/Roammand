@@ -26,7 +26,7 @@ native-webrtc = [
 [dependencies]
 futures = { version = "0.3.32", optional = true }
 libwebrtc = { version = "=0.3.27", default-features = false, optional = true }
-livekit-protocol = { version = "=0.7.2", optional = true }
+livekit-protocol = { version = "=0.7.12", optional = true }
 roammand-protocol = { path = "../../gen/rust" }
 thiserror = "2.0.18"
 webrtc-sys = { version = "=0.3.25", optional = true }

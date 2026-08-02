@@ -1336,19 +1336,14 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "livekit-protocol"
-version = "0.7.2"
+version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c21d56b4dc2598b1296ca891abb225bf1c05ea007d6f43bc4fd48c31be64bf59"
+checksum = "526f22bddf409e5f15449d55cf341647d7c16a1f43df9db9b05be106e4208e1c"
 dependencies = [
- "futures-util",
- "livekit-runtime",
- "parking_lot",
  "pbjson",
  "pbjson-types",
  "prost 0.12.6",
  "serde",
- "thiserror 1.0.69",
- "tokio",
 ]
 
 [[package]]
