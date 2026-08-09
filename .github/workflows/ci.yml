@@ -160,6 +160,14 @@ jobs:
       - name: Build mobile client
         working-directory: apps/client_flutter
         run: ${{ matrix.command }}
+      - name: Scan iOS build for private APIs
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/check_ios_private_api.sh apps/client_flutter/build/ios/iphonesimulator/Runner.app
+      - name: Test iOS private API scanner
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./scripts/test_ios_private_api_scan.sh
       - name: Confirm generated files and dependency locks are unchanged
         run: git diff --exit-code -- gen/dart/pubspec.lock apps/client_flutter/pubspec.lock apps/client_flutter/lib/l10n/generated apps/client_flutter/ios/Podfile.lock apps/client_flutter/macos/Podfile.lock
 

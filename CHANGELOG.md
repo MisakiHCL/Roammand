@@ -10,6 +10,13 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Replaced the hosted `flutter_webrtc` package with a reproducible,
+  repository-local 1.5.2 downstream patch that removes an unused private
+  ReplayKit selector from iOS and macOS builds, and added a release scanner
+  that rejects affected iOS artifacts before distribution.
+
 ## [1.0.2] - 2026-07-21
 
 ### Added

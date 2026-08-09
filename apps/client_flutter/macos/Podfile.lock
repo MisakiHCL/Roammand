@@ -1,5 +1,5 @@
 PODS:
-  - flutter_webrtc (1.4.0):
+  - flutter_webrtc (1.5.2-roammand.1):
     - FlutterMacOS
     - WebRTC-SDK (= 144.7559.09)
   - FlutterMacOS (1.0.0)
@@ -20,7 +20,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
 
 SPEC CHECKSUMS:
-  flutter_webrtc: fec3dc9284a1f6d21ec2caa91c90bb4c1824eb04
+  flutter_webrtc: 54847a47b8a6fc7e2043090828bd95be3d99c6e9
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   WebRTC-SDK: e6006119cd730d6315d875e4a421b6cc8bb88833
 

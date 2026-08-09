@@ -299,6 +299,26 @@ flutter build windows --release --no-pub
 
 Build output remains under `apps/client_flutter/build/` and is ignored by Git.
 
+### Check iOS artifacts for private APIs
+
+Scan every iOS artifact before distribution. The scanner accepts an `.app`,
+`.xcarchive`, or `.ipa`, walks every Mach-O file in the artifact—including the
+main executable, embedded frameworks, and app extensions—and searches the raw
+binary bytes for the forbidden ReplayKit selector `buttonPressed:`:
+
+```bash
+./scripts/check_ios_private_api.sh apps/client_flutter/build/ios/iphonesimulator/Runner.app
+./scripts/check_ios_private_api.sh apps/client_flutter/build/ios/archive/Runner.xcarchive
+./scripts/check_ios_private_api.sh path/to/Roammand.ipa
+```
+
+The command exits nonzero when the selector is present, when the artifact is
+malformed, or when it contains no Mach-O files. It does not depend on Objective-C
+metadata output from `otool`; the selector can reside in `__TEXT.__cstring`.
+macOS CI runs this scan immediately after its iOS Simulator build. For a release,
+scan both the final Archive and exported IPA produced from that Archive before
+uploading either build to App Store Connect.
+
 ## Release channels and versioning
 
 The macOS package published through GitHub Releases and the iOS app distributed
@@ -333,7 +353,8 @@ flutter build ipa --release \
 ```
 
 Before upload, verify `CFBundleShortVersionString` and `CFBundleVersion` in the
-Archive. Record releases unambiguously, for example, `macOS GitHub Release
+Archive, then run the private API scan above against both the Archive and the
+exported IPA. Record releases unambiguously, for example, `macOS GitHub Release
 1.4.0 (build 18)` or `iOS TestFlight 1.2.3 (build 27)`. App Store Connect uses
 the bundle ID and version to associate a build with its version record and the
 build string to identify that build uniquely; see Apple's

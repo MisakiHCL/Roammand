@@ -16,6 +16,7 @@ terms for project-authored material.
 | `conformance/` | Apache License 2.0 |
 | `docs/`, root public documentation, and `brand/*.md` | Apache License 2.0 |
 | Project-authored `infra/`, `packaging/`, and `scripts/` files carrying an Apache-2.0 SPDX identifier | Apache License 2.0 |
+| Project-authored downstream metadata under `third_party/` carrying an Apache-2.0 SPDX identifier | Apache License 2.0 |
 
 Full license texts are stored in `licenses/`. Project-authored source files carry the matching SPDX identifier; generated scaffolding inherits the license of its component path.
 
@@ -103,7 +104,7 @@ approval from macOS or from the other release line.
 
 | Dependency or asset | Upstream license/notice location | Distribution note |
 | --- | --- | --- |
-| `flutter_webrtc` 1.5.2 | `LICENSE` and `NOTICE` in the resolved pub package | MIT, with additional upstream notices that must accompany redistributed binaries as applicable |
+| `flutter_webrtc` 1.5.2 (Roammand downstream path package) | `third_party/flutter_webrtc/LICENSE`, `NOTICE`, `third_party/svpng/LICENSE`, `third_party_licenses/`, and `DOWNSTREAM_PATCH.md` | MIT, Apache-2.0, and BSD-3-Clause apply to the retained sources; preserve the WebRTC patent grant. The patch record identifies the original pub archive without treating its checksum as the modified package checksum |
 | `libwebrtc` 0.3.27 Rust wrapper | Fixed-revision LiveKit `LICENSE`, `NOTICE`, and `webrtc-sys/NOTICE.md` retained by the macOS compliance generator | Apache-2.0; preserve the LiveKit, WebRTC patch, arcas-io, Sora, and Unity notices selected for the locked crate revision |
 | Pinned native WebRTC archives | `LICENSE.md` inside each archive fetched by `scripts/fetch_libwebrtc.sh` | WebRTC BSD-style terms plus included third-party terms; reproduce applicable notices with binary distributions |
 

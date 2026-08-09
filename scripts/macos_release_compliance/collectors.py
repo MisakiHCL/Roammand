@@ -16,6 +16,8 @@ from .model import (
     LICENSE_RELATIVE_PATH,
     NATIVE_WEBRTC_RELEASE_URL,
     NOTICE_PREFIXES,
+    REPOSITORY_DART_NOTICE_EXACT_PATHS,
+    REPOSITORY_DART_PATH_DEPENDENCIES,
     RUST_RELEASE_ROOTS,
     Component,
     FlutterMetadata,
@@ -33,18 +35,30 @@ from .model import (
 from .vetted_cargo_notices import vetted_notice_for_package
 
 
-def notice_candidates(package_root: pathlib.Path) -> list[pathlib.Path]:
+def notice_candidates(
+    package_root: pathlib.Path,
+    *,
+    recursive: bool = False,
+    exact_relative_paths: frozenset[pathlib.PurePosixPath] = frozenset(),
+) -> list[pathlib.Path]:
     if not package_root.is_dir():
         return []
+    candidates = package_root.rglob("*") if recursive else package_root.iterdir()
     return sorted(
         (
             path
-            for path in package_root.iterdir()
+            for path in candidates
             if path.is_file()
             and not path.is_symlink()
-            and path.name.lower().startswith(NOTICE_PREFIXES)
+            and (
+                path.name.lower().startswith(NOTICE_PREFIXES)
+                or pathlib.PurePosixPath(
+                    path.relative_to(package_root).as_posix()
+                )
+                in exact_relative_paths
+            )
         ),
-        key=lambda path: path.name.lower(),
+        key=lambda path: path.relative_to(package_root).as_posix().lower(),
     )
 
 
@@ -496,7 +510,12 @@ def dart_components(
         if values is None:
             continue
         source = values.get("source", "")
-        if source in {"sdk", "path"}:
+        repository_relative = (
+            REPOSITORY_DART_PATH_DEPENDENCIES.get(name)
+            if source == "path"
+            else None
+        )
+        if source == "sdk" or (source == "path" and repository_relative is None):
             continue
         version = values.get("version", "")
         if not version:
@@ -504,11 +523,34 @@ def dart_components(
         root = roots.get(name)
         if root is None:
             raise fail(f"Dart package_config is missing {name}")
-        paths = notice_candidates(root)
+        if repository_relative is not None:
+            expected_root = (repo_root / repository_relative).resolve()
+            if root.resolve() != expected_root:
+                raise fail(
+                    f"Dart path package {name} must resolve to repository "
+                    f"{repository_relative.as_posix()}"
+                )
+        paths = notice_candidates(
+            root,
+            recursive=repository_relative is not None,
+            exact_relative_paths=(
+                REPOSITORY_DART_NOTICE_EXACT_PATHS.get(name, frozenset())
+                if repository_relative is not None
+                else frozenset()
+            ),
+        )
         if not paths:
             raise fail(f"Dart package {name} has no LICENSE or NOTICE file")
         notices = tuple(
-            Notice(path.name, read_text(path, f"Dart notice for {name}")) for path in paths
+            Notice(
+                (
+                    path.relative_to(root).as_posix()
+                    if repository_relative is not None
+                    else path.name
+                ),
+                read_text(path, f"Dart notice for {name}"),
+            )
+            for path in paths
         )
         license_notice = next(
             (notice for notice in notices if notice.label.lower().startswith(("license", "copying"))),
@@ -522,7 +564,14 @@ def dart_components(
                 f"LicenseRef-Pub-{re.sub(r'[^A-Za-z0-9.-]+', '-', name)}-"
                 f"{sha256_text(license_notice.text)[:12]}"
             )
-        if name == "flutter_webrtc" and license_declared == "MIT":
+        if repository_relative is not None:
+            discovered_licenses = [license_declared]
+            for notice in notices:
+                discovered = infer_license_expression(notice.text, notice.label)
+                if discovered and discovered not in discovered_licenses:
+                    discovered_licenses.append(discovered)
+            license_declared = " AND ".join(discovered_licenses)
+        elif name == "flutter_webrtc" and license_declared == "MIT":
             has_apache_notice = any(
                 notice.label.lower().startswith("notice")
                 and "apache license" in notice.text.lower()
@@ -531,21 +580,43 @@ def dart_components(
             )
             if has_apache_notice:
                 license_declared = "MIT AND Apache-2.0"
-        checksum = values.get("sha256", "")
+        checksum = (
+            "" if repository_relative is not None else values.get("sha256", "")
+        )
         if checksum and not re.fullmatch(r"[0-9a-fA-F]{64}", checksum):
             raise fail(f"Dart package {name} has an invalid checksum")
-        source_url = f"https://pub.dev/packages/{name}/versions/{version}"
+        if repository_relative is not None:
+            source_url = (
+                f"{normalized_url(arguments.source_url).rstrip('/')}/tree/"
+                f"{urllib.parse.quote(arguments.source_revision, safe='')}/"
+                f"{urllib.parse.quote(repository_relative.as_posix(), safe='/')}"
+            )
+            ecosystem = "pub-path"
+            download_location = "NOASSERTION"
+            purl = ""
+            summary = (
+                "Repository-local modified Dart path dependency at "
+                f"{repository_relative.as_posix()}; based on upstream {name} "
+                f"{version}."
+            )
+        else:
+            source_url = f"https://pub.dev/packages/{name}/versions/{version}"
+            ecosystem = "pub"
+            download_location = source_url
+            purl = f"pkg:pub/{urllib.parse.quote(name)}@{urllib.parse.quote(version)}"
+            summary = ""
         components.append(
             Component(
-                ecosystem="pub",
+                ecosystem=ecosystem,
                 name=name,
                 version=version,
                 license_declared=license_declared,
                 license_concluded=license_declared,
                 source_url=source_url,
-                download_location=source_url,
+                download_location=download_location,
                 checksum=checksum,
-                purl=f"pkg:pub/{urllib.parse.quote(name)}@{urllib.parse.quote(version)}",
+                purl=purl,
+                summary=summary,
                 notices=notices,
             )
         )

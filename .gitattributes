@@ -1,2 +1,5 @@
 conformance/wordlists/bip39-english.txt text eol=lf
 apps/client_flutter/assets/bip39-english.txt text eol=lf
+
+# Preserve the vendored pub archive's bytes and historical whitespace.
+third_party/flutter_webrtc/** -text whitespace=-trailing-space,-space-before-tab

@@ -270,6 +270,24 @@ flutter build windows --release --no-pub
 
 构建产物保存在 `apps/client_flutter/build/`，并由 Git 忽略。
 
+### 检查 iOS 制品中的私有 API
+
+每个 iOS 制品在分发前都必须扫描。扫描脚本支持 `.app`、`.xcarchive` 和 `.ipa`，
+会遍历制品内的全部 Mach-O 文件，包括主可执行文件、嵌入式 Framework 和 App
+Extension，并在原始二进制字节中查找被禁止的 ReplayKit selector
+`buttonPressed:`：
+
+```bash
+./scripts/check_ios_private_api.sh apps/client_flutter/build/ios/iphonesimulator/Runner.app
+./scripts/check_ios_private_api.sh apps/client_flutter/build/ios/archive/Runner.xcarchive
+./scripts/check_ios_private_api.sh path/to/Roammand.ipa
+```
+
+如果命中 selector、制品格式无效或没有任何 Mach-O 文件，脚本都会以非零状态退出。
+它不依赖 `otool` 输出的 Objective-C 元数据，因为该 selector 可能位于
+`__TEXT.__cstring`。macOS CI 会在 iOS Simulator 构建完成后立即执行扫描。发行时，
+必须在上传 App Store Connect 前分别扫描最终 Archive 和由该 Archive 导出的 IPA。
+
 ## 发布通道与版本规则
 
 通过 GitHub Releases 发布的 macOS 安装包与通过 TestFlight/App Store 分发的
@@ -299,7 +317,8 @@ flutter build ipa --release \
   --no-pub
 ```
 
-上传前必须核对 Archive 中的 `CFBundleShortVersionString` 与 `CFBundleVersion`。
+上传前必须核对 Archive 中的 `CFBundleShortVersionString` 与 `CFBundleVersion`，
+并按上文要求分别扫描 Archive 和导出的 IPA。
 发布记录应写成 `macOS GitHub Release 1.4.0 (build 18)` 或 `iOS TestFlight
 1.2.3 (build 27)` 等无歧义形式。App Store Connect 使用 Bundle ID 与版本号把构建
 关联到版本记录，并使用构建字符串唯一识别该构建；参见 Apple 的

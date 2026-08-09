@@ -1,6 +1,6 @@
 PODS:
   - Flutter (1.0.0)
-  - flutter_webrtc (1.4.0):
+  - flutter_webrtc (1.5.2-roammand.1):
     - Flutter
     - WebRTC-SDK (= 144.7559.09)
   - WebRTC-SDK (144.7559.09)
@@ -21,7 +21,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  flutter_webrtc: 3ee86aa10e0313c38c93fdb215dd86e77014f96a
+  flutter_webrtc: e65be4a6a1d27c694dbfbc14c28b11f9495beba5
   WebRTC-SDK: e6006119cd730d6315d875e4a421b6cc8bb88833
 
 PODFILE CHECKSUM: dc70f8edce6ccfe0a515fe6f28bec541064a250e

@@ -33,7 +33,14 @@ VOLATILE_PACKAGE_FILES = {
         for name in OUTPUT_NAMES
     ),
 }
-NOTICE_PREFIXES = ("license", "copying", "notice", "copyright", "unlicense")
+NOTICE_PREFIXES = (
+    "license",
+    "copying",
+    "notice",
+    "copyright",
+    "unlicense",
+    "patents",
+)
 RUST_RELEASE_ROOTS = {
     "roammand-host-agent",
     "roammand-privileged-bridge",
@@ -41,6 +48,19 @@ RUST_RELEASE_ROOTS = {
 SOURCE_DATE_ENVIRONMENT_VARIABLE = "SOURCE_DATE_EPOCH"
 DEFAULT_REPOSITORY_URL = "https://github.com/MisakiHCL/roammand"
 NATIVE_WEBRTC_RELEASE_URL = "https://github.com/livekit/rust-sdks/releases/tag"
+REPOSITORY_DART_PATH_DEPENDENCIES: dict[str, pathlib.PurePosixPath] = {
+    "flutter_webrtc": pathlib.PurePosixPath("third_party/flutter_webrtc"),
+}
+REPOSITORY_DART_NOTICE_EXACT_PATHS: dict[
+    str, frozenset[pathlib.PurePosixPath]
+] = {
+    "flutter_webrtc": frozenset(
+        {
+            pathlib.PurePosixPath("DOWNSTREAM_PATCH.md"),
+            pathlib.PurePosixPath("third_party_licenses/README.md"),
+        }
+    ),
+}
 SPDX_LICENSE_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]*")
 SPDX_LICENSE_REF_TOKEN = re.compile(r"LicenseRef-[A-Za-z0-9.-]+")
 
@@ -524,4 +544,41 @@ def validated_source_input_digests(
         if current_bytes != source_bytes:
             raise fail(f"source input does not match revision: {relative}")
         digests[relative] = hashlib.sha256(current_bytes).hexdigest()
+
+    repository_trees = sorted(
+        {path.as_posix() for path in REPOSITORY_DART_PATH_DEPENDENCIES.values()}
+    )
+    for tree in repository_trees:
+        prefix = f"{tree.rstrip('/')}/"
+        revision_files = sorted(
+            path for path in revision_listing if path.startswith(prefix)
+        )
+        tracked_files = sorted(
+            path for path in tracked_listing if path.startswith(prefix)
+        )
+        if not revision_files:
+            raise fail(f"repository path dependency is missing at revision: {tree}")
+        if revision_files != tracked_files:
+            raise fail(
+                f"repository path dependency file set differs from revision: {tree}"
+            )
+
+        manifest_lines: list[str] = []
+        for relative in revision_files:
+            current_path = require_file(
+                repo_root / relative, f"repository path dependency source {relative}"
+            )
+            source_bytes = git_output(
+                repo_root,
+                ("show", f"{revision}:{relative}"),
+                relative,
+                text=False,
+            )
+            current_bytes = current_path.read_bytes()
+            if current_bytes != source_bytes:
+                raise fail(f"source input does not match revision: {relative}")
+            manifest_lines.append(
+                f"{hashlib.sha256(current_bytes).hexdigest()}  {relative}"
+            )
+        digests[f"{tree}/**"] = sha256_text("\n".join(manifest_lines) + "\n")
     return digests

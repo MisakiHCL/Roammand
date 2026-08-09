@@ -18,13 +18,17 @@ readonly CARGO_BUILD_PACKAGE_DIR="$INPUT_DIR/cargo/sample-build-4.5.6"
 readonly CARGO_DEV_PACKAGE_DIR="$INPUT_DIR/cargo/sample-dev-6.7.8"
 readonly UNKNOWN_CARGO_PACKAGE_DIR="$INPUT_DIR/cargo/unknown-rust-license-9.9.9"
 readonly DART_PACKAGE_DIR="$INPUT_DIR/dart/sample_dart-2.3.4"
-readonly DART_WEBRTC_PACKAGE_DIR="$INPUT_DIR/dart/flutter_webrtc-1.5.2"
+readonly DART_WEBRTC_PACKAGE_DIR="$ROOT_DIR/third_party/flutter_webrtc"
 readonly UNLICENSED_DART_PACKAGE_DIR="$INPUT_DIR/dart/unlicensed_dart-9.9.9"
 readonly SOURCE_REVISION="0123456789abcdef0123456789abcdef01234567"
 readonly SOURCE_URL="https://example.test/roammand"
 readonly COPYRIGHT_HOLDER="ChengLong Hu"
 readonly FIXED_SOURCE_DATE_EPOCH="1704067200"
 readonly FLUTTER_ENGINE_REVISION="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+readonly FLUTTER_WEBRTC_UPSTREAM_ARCHIVE_SHA256="0f89dee7f4c35dab5611f351c3897a3bfe9f7057720cc7da209b52455af4316e"
+readonly FLUTTER_LICENSE_SHA256="a598db94b6290ffbe10b5ecf911057b6a943351c727fdda9e5f2891d68700a20"
+readonly WEBRTC_LICENSE_SHA256="ab00a482b6a3902e40211b43c5d0441962ea99b6cc7c25c0f243fa270b78d482"
+readonly WEBRTC_PATENTS_SHA256="01462e2068d1a04c2274f3389773014c14ed9bc3446b28303543bd3e3c064145"
 
 fail() {
   printf 'macOS release compliance test failed: %s\n' "$1" >&2
@@ -137,8 +141,21 @@ write_dependency_fixtures() {
   mkdir -p "$CARGO_PACKAGE_DIR" "$CARGO_BUILD_PACKAGE_DIR" \
     "$CARGO_DEV_PACKAGE_DIR" "$UNKNOWN_CARGO_PACKAGE_DIR" \
     "$DART_PACKAGE_DIR/lib" \
-    "$DART_WEBRTC_PACKAGE_DIR/lib" \
     "$UNLICENSED_DART_PACKAGE_DIR/lib"
+
+  for required_notice in \
+    LICENSE \
+    NOTICE \
+    DOWNSTREAM_PATCH.md \
+    third_party/svpng/LICENSE \
+    third_party_licenses/LICENSE-FLUTTER \
+    third_party_licenses/LICENSE-WEBRTC \
+    third_party_licenses/NOTICE-WEBRTC-PATENTS \
+    third_party_licenses/README.md; do
+    [[ -f "$DART_WEBRTC_PACKAGE_DIR/$required_notice" ]] || {
+      fail "missing repository flutter_webrtc notice input: $required_notice"
+    }
+  done
 
   printf 'Sample Rust fixture MIT license text.\n' \
     >"$CARGO_PACKAGE_DIR/LICENSE"
@@ -150,10 +167,6 @@ write_dependency_fixtures() {
     >"$DART_PACKAGE_DIR/LICENSE"
   printf 'Sample Dart fixture additional attribution.\n' \
     >"$DART_PACKAGE_DIR/NOTICE"
-  printf 'MIT License\n\nPermission is hereby granted, free of charge.\nTHE SOFTWARE IS PROVIDED "AS IS".\n' \
-    >"$DART_WEBRTC_PACKAGE_DIR/LICENSE"
-  printf 'Apache License\nVersion 2.0, January 2004\n' \
-    >"$DART_WEBRTC_PACKAGE_DIR/NOTICE"
   cat >"$CARGO_PACKAGE_DIR/Cargo.toml" <<'EOF'
 [package]
 name = "sample-rust"
@@ -193,12 +206,6 @@ version: 9.9.9
 homepage: https://example.test/unlicensed-dart
 repository: https://example.test/unlicensed-dart/source
 EOF
-  cat >"$DART_WEBRTC_PACKAGE_DIR/pubspec.yaml" <<'EOF'
-name: flutter_webrtc
-version: 1.5.2
-repository: https://github.com/flutter-webrtc/flutter-webrtc
-EOF
-
   cat >"$INPUT_DIR/cargo-metadata.json" <<EOF
 {
   "packages": [
@@ -389,16 +396,16 @@ EOF
 }
 EOF
 
-  cat >"$INPUT_DIR/pubspec.lock" <<'EOF'
+  cat >"$INPUT_DIR/pubspec.lock" <<EOF
 # Generated fixture.
 packages:
   flutter_webrtc:
     dependency: "direct main"
     description:
-      name: flutter_webrtc
-      sha256: "abababababababababababababababababababababababababababababababab"
-      url: "https://pub.dev"
-    source: hosted
+      path: "../../../third_party/flutter_webrtc"
+      relative: true
+      sha256: "$FLUTTER_WEBRTC_UPSTREAM_ARCHIVE_SHA256"
+    source: path
     version: "1.5.2"
   sample_dart:
     dependency: "direct main"
@@ -465,7 +472,7 @@ EOF
 
   cat >"$INPUT_DIR/Podfile.lock" <<'EOF'
 PODS:
-  - flutter_webrtc (1.4.0):
+  - flutter_webrtc (1.5.2-roammand.1):
     - FlutterMacOS
     - WebRTC-SDK (= 144.7559.09)
   - FlutterMacOS (1.0.0)
@@ -542,7 +549,11 @@ generate_compliance() {
 
 assert_spdx_contract() {
   local sbom="$1"
-  python3 - "$sbom" "$SOURCE_REVISION" <<'PY'
+  python3 - \
+    "$sbom" \
+    "$SOURCE_REVISION" \
+    "$SOURCE_URL" \
+    "$FLUTTER_WEBRTC_UPSTREAM_ARCHIVE_SHA256" <<'PY'
 import json
 import hashlib
 import pathlib
@@ -551,6 +562,8 @@ import sys
 
 path = pathlib.Path(sys.argv[1])
 revision = sys.argv[2]
+source_url = sys.argv[3]
+upstream_archive_sha256 = sys.argv[4]
 with path.open(encoding="utf-8") as source:
     document = json.load(source)
 
@@ -586,7 +599,24 @@ assert packages["WebRTC-SDK"]["versionInfo"] == "144.7559.09"
 assert packages["WebRTC-SDK"]["checksums"] == [
     {"algorithm": "SHA1", "checksumValue": "f" * 40}
 ]
-assert packages["flutter_webrtc"]["licenseDeclared"] == "MIT AND Apache-2.0"
+path_webrtc_source = (
+    f"{source_url}/tree/{revision}/third_party/flutter_webrtc"
+)
+path_webrtc = next(
+    package
+    for package in document["packages"]
+    if package["name"] == "flutter_webrtc"
+    and package["sourceInfo"] == path_webrtc_source
+)
+assert path_webrtc["versionInfo"] == "1.5.2"
+assert path_webrtc["licenseDeclared"] == (
+    "MIT AND Apache-2.0 AND BSD-3-Clause"
+)
+assert path_webrtc["downloadLocation"] == "NOASSERTION"
+assert "Repository-local modified Dart path dependency" in path_webrtc["summary"]
+assert "checksums" not in path_webrtc
+assert "externalRefs" not in path_webrtc
+assert upstream_archive_sha256 not in json.dumps(path_webrtc, sort_keys=True)
 assert packages["BIP-39 English word list"]["sourceInfo"].endswith(
     "ce1862ac6bcffa1dd20aad858380e51e66e949ea/bip-0039/english.txt"
 )
@@ -623,6 +653,7 @@ external_refs = [
 ]
 assert "pkg:cargo/sample-rust@1.2.3" in external_refs
 assert "pkg:pub/sample_dart@2.3.4" in external_refs
+assert "pkg:pub/flutter_webrtc@1.5.2" not in external_refs
 
 files = document.get("files", [])
 assert files, "SPDX document has no shipped-file inventory"
@@ -826,6 +857,19 @@ for expected in \
   "Sample Rust fixture MIT license text." \
   "WebRTC-SDK fixture BSD-3-Clause notice." \
   "flutter_webrtc fixture MIT notice." \
+  "Copyright (c) 2018 湖北捷智云技术有限公司" \
+  "Copyright 2014 The Flutter Authors. All rights reserved." \
+  "Copyright (c) 2011, The WebRTC project authors. All rights reserved." \
+  "Additional IP Rights Grant (Patents)" \
+  "Copyright (C) 2017 Milo Yip. All rights reserved." \
+  "$FLUTTER_LICENSE_SHA256" \
+  "$WEBRTC_LICENSE_SHA256" \
+  "$WEBRTC_PATENTS_SHA256" \
+  "$FLUTTER_WEBRTC_UPSTREAM_ARCHIVE_SHA256" \
+  "These files preserve the missing" \
+  "https://github.com/flutter/flutter/blob/559ffa3f75e7402d65a8def9c28389a9b2e6fe42/LICENSE" \
+  "https://webrtc.googlesource.com/src/+/refs/branch-heads/7559/LICENSE" \
+  "https://webrtc.googlesource.com/src/+/refs/branch-heads/7559/PATENTS" \
   "BIP-39 fixture MIT notice." \
   "Native WebRTC arm64 fixture notice." \
   "Native WebRTC x86_64 fixture notice."; do
@@ -838,9 +882,16 @@ for expected in \
   "$COPYRIGHT_HOLDER" \
   "https://example.test/sample-rust" \
   "https://pub.dev/packages/sample_dart" \
+  "$SOURCE_URL/tree/$SOURCE_REVISION/third_party/flutter_webrtc" \
   "webrtc-fixture-1"; do
   require_text "$OUTPUT_ONE/SOURCE_CODE.md" "$expected"
 done
+
+if rg --quiet --fixed-strings \
+  "https://pub.dev/packages/flutter_webrtc" \
+  "$OUTPUT_ONE/SOURCE_CODE.md"; then
+  fail "modified path flutter_webrtc is represented as hosted pub source"
+fi
 
 assert_failure_is_atomic \
   "unknown-cargo-license" \
@@ -955,6 +1006,7 @@ for required in (
     "apps/client_flutter/pubspec.lock",
     "apps/client_flutter/macos/Podfile",
     "apps/client_flutter/macos/Podfile.lock",
+    "third_party/flutter_webrtc/**",
     "scripts/libwebrtc-assets.sha256",
     "conformance/wordlists/bip39-english.txt",
 ):
