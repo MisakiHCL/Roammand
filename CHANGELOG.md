@@ -12,6 +12,9 @@ and released versions follow semantic versioning.
 
 ### Fixed
 
+- Serialized QR scanner lifecycle commands so a camera permission request that
+  completes after iOS backgrounds the app is immediately paused and cannot be
+  resumed by a stale foreground event.
 - Replaced the hosted `flutter_webrtc` package with a reproducible,
   repository-local 1.5.2 downstream patch that removes an unused private
   ReplayKit selector from iOS and macOS builds, and added a release scanner

@@ -48,6 +48,10 @@ abstract interface class MobileControllerPairingSession {
 typedef MobilePairingSessionFactory =
     Future<MobileControllerPairingSession> Function();
 
+enum _ScannerRuntimeState { stopped, running, paused }
+
+enum _ScannerTargetState { stopped, running, paused }
+
 Future<MobileControllerPairingSession> createMobilePairingSession({
   required MobileDeviceIdentity identity,
   required TrustedHostRepository trustedHosts,
@@ -102,7 +106,12 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
   bool _claimedCode = false;
   bool _confirmingCode = false;
   bool _creatingSession = false;
-  bool _scannerStarting = false;
+  AppLifecycleState _appLifecycleState = AppLifecycleState.resumed;
+  _ScannerRuntimeState _scannerRuntimeState = _ScannerRuntimeState.stopped;
+  Future<void> _scannerCommandTail = Future<void>.value();
+  Future<void>? _scannerReconcileOperation;
+  bool _scannerReconcileRequested = false;
+  bool _scannerHasStarted = false;
   bool _successfulPairingCloseScheduled = false;
   bool _disposed = false;
   Timer? _countdown;
@@ -111,35 +120,103 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _appLifecycleState =
+        WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
     _ownsScanner = widget.scanner == null;
     _scanner = widget.scanner ?? MobileQrScannerSession();
     _scannerSubscription = _scanner.events.listen(_onScannerEvent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_disposed) unawaited(_startScanner());
+      if (!_disposed) unawaited(_requestScannerReconciliation());
     });
   }
 
-  Future<void> _startScanner() async {
-    if (_disposed || _scannerStarting) return;
-    _scannerStarting = true;
+  Future<void> _requestScannerReconciliation() {
+    _scannerReconcileRequested = true;
+    return _scannerReconcileOperation ??= _reconcileScannerState();
+  }
+
+  Future<void> _reconcileScannerState() async {
     try {
-      await _scanner.start();
+      while (!_disposed) {
+        _scannerReconcileRequested = false;
+        final target = _scannerTargetState;
+        await _applyScannerTarget(target);
+        if (!_scannerReconcileRequested &&
+            _scannerTargetSatisfied(_scannerTargetState)) {
+          return;
+        }
+      }
     } finally {
-      _scannerStarting = false;
+      _scannerReconcileOperation = null;
+      if (_scannerReconcileRequested && !_disposed) {
+        unawaited(_requestScannerReconciliation());
+      }
     }
   }
 
+  _ScannerTargetState get _scannerTargetState {
+    if (_claimedCode) return _ScannerTargetState.stopped;
+    if (_confirmingCode || _appLifecycleState != AppLifecycleState.resumed) {
+      return _ScannerTargetState.paused;
+    }
+    return _ScannerTargetState.running;
+  }
+
+  Future<void> _applyScannerTarget(_ScannerTargetState target) async {
+    switch (target) {
+      case _ScannerTargetState.running:
+        if (_scannerRuntimeState == _ScannerRuntimeState.running) return;
+        if (_scannerHasStarted) {
+          await _enqueueScannerCommand(_scanner.resume);
+        } else {
+          await _enqueueScannerCommand(_scanner.start);
+          _scannerHasStarted = true;
+        }
+        _scannerRuntimeState = _ScannerRuntimeState.running;
+      case _ScannerTargetState.paused:
+        if (_scannerRuntimeState != _ScannerRuntimeState.running) return;
+        await _enqueueScannerCommand(_scanner.pause);
+        _scannerRuntimeState = _ScannerRuntimeState.paused;
+      case _ScannerTargetState.stopped:
+        if (!_scannerHasStarted ||
+            _scannerRuntimeState == _ScannerRuntimeState.stopped) {
+          return;
+        }
+        await _enqueueScannerCommand(_scanner.stop);
+        _scannerRuntimeState = _ScannerRuntimeState.stopped;
+    }
+  }
+
+  Future<void> _enqueueScannerCommand(Future<void> Function() command) {
+    final operation = _scannerCommandTail.then((_) => command());
+    _scannerCommandTail = operation.then<void>((_) {}, onError: (_, _) {});
+    return operation;
+  }
+
+  Future<void> _runScannerControl(Future<void> Function() command) async {
+    await _requestScannerReconciliation();
+    if (_disposed ||
+        _scannerTargetState != _ScannerTargetState.running ||
+        _scannerRuntimeState != _ScannerRuntimeState.running) {
+      return;
+    }
+    await _enqueueScannerCommand(command);
+    if (!_disposed) await _requestScannerReconciliation();
+  }
+
+  bool _scannerTargetSatisfied(_ScannerTargetState target) => switch (target) {
+    _ScannerTargetState.running =>
+      _scannerRuntimeState == _ScannerRuntimeState.running,
+    _ScannerTargetState.paused =>
+      _scannerRuntimeState != _ScannerRuntimeState.running,
+    _ScannerTargetState.stopped =>
+      _scannerRuntimeState == _ScannerRuntimeState.stopped,
+  };
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_disposed || _claimedCode || _confirmingCode) return;
-    if (state == AppLifecycleState.resumed) {
-      if (!_scannerStarting) unawaited(_scanner.resume());
-    } else if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached ||
-        state == AppLifecycleState.hidden) {
-      if (!_scannerStarting) unawaited(_scanner.pause());
-    }
+    _appLifecycleState = state;
+    if (!_disposed) unawaited(_requestScannerReconciliation());
   }
 
   void _onScannerEvent(QrScannerEvent event) {
@@ -150,7 +227,9 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
           setState(() => _scannerFailure = null);
         }
       case QrScannerCode(:final value):
-        _acceptCode(value);
+        if (_appLifecycleState == AppLifecycleState.resumed) {
+          _acceptCode(value);
+        }
       case QrScannerFailed(:final failure):
         if (mounted) setState(() => _scannerFailure = failure);
     }
@@ -171,12 +250,12 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
     }
     if (_requiresServerConfirmation(invitation)) {
       _confirmingCode = true;
-      await _scanner.pause();
+      await _requestScannerReconciliation();
       if (_disposed) return;
       final confirmed = await _confirmUnfamiliarServer(invitation);
       _confirmingCode = false;
       if (!confirmed) {
-        if (!_disposed) await _scanner.resume();
+        if (!_disposed) await _requestScannerReconciliation();
         return;
       }
     }
@@ -188,7 +267,7 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
         _creatingSession = true;
       });
     }
-    await _scanner.stop();
+    await _requestScannerReconciliation();
     if (_disposed) return;
     try {
       final session =
@@ -294,13 +373,25 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
   @override
   void dispose() {
     _disposed = true;
+    final scannerOperation = _scannerReconcileOperation;
     WidgetsBinding.instance.removeObserver(this);
     _countdown?.cancel();
     unawaited(_scannerSubscription?.cancel());
     unawaited(_pairingSubscription?.cancel());
     unawaited(_session?.close());
-    if (_ownsScanner) unawaited(_scanner.close());
+    if (_ownsScanner) {
+      unawaited(_closeOwnedScanner(scannerOperation));
+    }
     super.dispose();
+  }
+
+  Future<void> _closeOwnedScanner(Future<void>? scannerOperation) async {
+    try {
+      await scannerOperation;
+      await _scannerCommandTail;
+    } finally {
+      await _scanner.close();
+    }
   }
 
   @override
@@ -390,14 +481,16 @@ final class _MobilePairingPageState extends State<MobilePairingPage>
                     const Spacer(),
                     _scannerButton(
                       key: const Key('mobile-scanner-torch'),
-                      onPressed: () => unawaited(_scanner.toggleTorch()),
+                      onPressed: () =>
+                          unawaited(_runScannerControl(_scanner.toggleTorch)),
                       tooltip: strings.mobileScannerTorchAction,
                       icon: Icons.flashlight_on_outlined,
                     ),
                     const SizedBox(width: _scannerElementSpacing),
                     _scannerButton(
                       key: const Key('mobile-scanner-switch-camera'),
-                      onPressed: () => unawaited(_scanner.switchCamera()),
+                      onPressed: () =>
+                          unawaited(_runScannerControl(_scanner.switchCamera)),
                       tooltip: strings.mobileScannerSwitchCameraAction,
                       icon: Icons.cameraswitch_outlined,
                     ),

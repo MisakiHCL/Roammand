@@ -113,6 +113,56 @@ void main() {
     await repository.close();
   });
 
+  testWidgets('does not resume after cancelling confirmation in background', (
+    tester,
+  ) async {
+    const now = 1_000_000;
+    final scanner = _FakeScanner();
+    final session = _FakeSession();
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 22),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+    final networkServices = NetworkServiceController.transient();
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          networkServices: networkServices,
+          scanner: scanner,
+          sessionFactory: () async => session,
+          nowUnixMs: () => now,
+        ),
+      ),
+    );
+    await tester.pump();
+    scanner.emit(QrScannerCode(encodeQrPairingUri(_invitation(now))));
+    await tester.pumpAndSettle();
+    expect(scanner.pauseCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(scanner.resumeCalls, 0);
+    expect(session.pairCalls, 0);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(scanner.resumeCalls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    networkServices.dispose();
+    await scanner.close();
+    await repository.close();
+  });
+
   testWidgets('keeps scanning after an invalid or expired QR', (tester) async {
     final scanner = _FakeScanner();
     final identity = await MobileDeviceIdentity.fromSeed(
@@ -317,7 +367,49 @@ void main() {
     await repository.close();
   });
 
-  testWidgets('does not restart while the first permission request is active', (
+  testWidgets('pauses when backgrounded during the first permission request', (
+    tester,
+  ) async {
+    final startGate = Completer<void>();
+    final scanner = _FakeScanner(startGate: startGate);
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 8),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          scanner: scanner,
+          sessionFactory: () async => _FakeSession(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(scanner.startCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    startGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(scanner.pauseCalls, 1);
+    expect(scanner.resumeCalls, 0);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await scanner.close();
+    await repository.close();
+  });
+
+  testWidgets('keeps the latest foreground state during permission request', (
     tester,
   ) async {
     final startGate = Completer<void>();
@@ -354,7 +446,232 @@ void main() {
 
     startGate.complete();
     await tester.pump();
+    await tester.pump();
+
+    expect(scanner.pauseCalls, 0);
+    expect(scanner.resumeCalls, 0);
+
     await tester.pumpWidget(const SizedBox.shrink());
+    await scanner.close();
+    await repository.close();
+  });
+
+  testWidgets('serializes pause and resume across rapid lifecycle changes', (
+    tester,
+  ) async {
+    final pauseGate = Completer<void>();
+    final scanner = _FakeScanner(pauseGate: pauseGate);
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 12),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          scanner: scanner,
+          sessionFactory: () async => _FakeSession(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(scanner.startCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(scanner.pauseCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(scanner.resumeCalls, 0);
+
+    pauseGate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(scanner.resumeCalls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await scanner.close();
+    await repository.close();
+  });
+
+  testWidgets('queues background pause after an in-flight camera switch', (
+    tester,
+  ) async {
+    final switchCameraGate = Completer<void>();
+    final scanner = _FakeScanner(switchCameraGate: switchCameraGate);
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 14),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          scanner: scanner,
+          sessionFactory: () async => _FakeSession(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('mobile-scanner-switch-camera')));
+    await tester.pump();
+    await tester.pump();
+    expect(scanner.switchCameraCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(scanner.pauseCalls, 0);
+
+    switchCameraGate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(scanner.pauseCalls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await scanner.close();
+    await repository.close();
+  });
+
+  testWidgets('ignores QR codes while a background pause is pending', (
+    tester,
+  ) async {
+    const now = 1_000_000;
+    final pauseGate = Completer<void>();
+    final scanner = _FakeScanner(pauseGate: pauseGate);
+    final session = _FakeSession();
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 15),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+    final encoded = encodeQrPairingUri(_invitation(now));
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          scanner: scanner,
+          sessionFactory: () async => session,
+          nowUnixMs: () => now,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(scanner.pauseCalls, 1);
+
+    scanner.emit(QrScannerCode(encoded));
+    await tester.pump();
+    expect(scanner.stopCalls, 0);
+    expect(session.pairCalls, 0);
+
+    pauseGate.complete();
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+    expect(scanner.resumeCalls, 1);
+
+    scanner.emit(QrScannerCode(encoded));
+    await tester.pump();
+    await tester.pump();
+    expect(scanner.stopCalls, 1);
+    expect(session.pairCalls, 1);
+
+    session.complete();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await scanner.close();
+    await repository.close();
+  });
+
+  testWidgets('waits to start until the app is foreground active', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    final scanner = _FakeScanner();
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 16),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          scanner: scanner,
+          sessionFactory: () async => _FakeSession(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(scanner.startCalls, 0);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(scanner.startCalls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await scanner.close();
+    await repository.close();
+  });
+
+  testWidgets('does not issue scanner commands after disposal', (tester) async {
+    final startGate = Completer<void>();
+    final scanner = _FakeScanner(startGate: startGate);
+    final identity = await MobileDeviceIdentity.fromSeed(
+      seed: List<int>.filled(32, 13),
+      displayName: 'Phone',
+      platform: DevicePlatform.DEVICE_PLATFORM_IOS,
+    );
+    final repository = TrustedHostRepository(persistence: _MemoryHosts());
+    await repository.initialize();
+
+    await tester.pumpWidget(
+      _app(
+        MobilePairingPage(
+          identity: identity,
+          trustedHosts: repository,
+          scanner: scanner,
+          sessionFactory: () async => _FakeSession(),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(scanner.startCalls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    startGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(scanner.pauseCalls, 0);
+    expect(scanner.resumeCalls, 0);
+    expect(scanner.stopCalls, 0);
+
     await scanner.close();
     await repository.close();
   });
@@ -518,9 +835,11 @@ HostPairingInvitation _invitation(int now) {
 }
 
 final class _FakeScanner implements QrScannerSession {
-  _FakeScanner({this.startGate});
+  _FakeScanner({this.startGate, this.pauseGate, this.switchCameraGate});
 
   final Completer<void>? startGate;
+  final Completer<void>? pauseGate;
+  final Completer<void>? switchCameraGate;
   final StreamController<QrScannerEvent> _events =
       StreamController<QrScannerEvent>.broadcast(sync: true);
   int startCalls = 0;
@@ -544,13 +863,21 @@ final class _FakeScanner implements QrScannerSession {
   @override
   Future<void> stop() async => stopCalls += 1;
   @override
-  Future<void> pause() async => pauseCalls += 1;
+  Future<void> pause() async {
+    pauseCalls += 1;
+    await pauseGate?.future;
+  }
+
   @override
   Future<void> resume() async => resumeCalls += 1;
   @override
   Future<void> toggleTorch() async => toggleTorchCalls += 1;
   @override
-  Future<void> switchCamera() async => switchCameraCalls += 1;
+  Future<void> switchCamera() async {
+    switchCameraCalls += 1;
+    await switchCameraGate?.future;
+  }
+
   @override
   Future<void> close() => _events.close();
 }
