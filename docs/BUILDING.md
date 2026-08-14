@@ -299,6 +299,17 @@ flutter build windows --release --no-pub
 
 Build output remains under `apps/client_flutter/build/` and is ignored by Git.
 
+The iOS and iPadOS deployment target is 15.0 or later. Verify the generated
+Simulator App and final Archive before distribution; both commands must print
+`15.0`:
+
+```bash
+/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' \
+  apps/client_flutter/build/ios/iphonesimulator/Runner.app/Info.plist
+/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' \
+  apps/client_flutter/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist
+```
+
 ### Check iOS artifacts for private APIs
 
 Scan every iOS artifact before distribution. The scanner accepts an `.app`,

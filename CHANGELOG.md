@@ -10,6 +10,11 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Raised the iOS and iPadOS minimum deployment target from 13.0 to 15.0 for
+  App Store Connect compatibility beginning in spring 2027.
+
 ### Fixed
 
 - Serialized QR scanner lifecycle commands so a camera permission request that

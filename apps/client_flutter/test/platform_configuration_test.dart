@@ -166,6 +166,18 @@ void main() {
     final iosProject = File(
       'ios/Runner.xcodeproj/project.pbxproj',
     ).readAsStringSync();
+    const iosMinimumVersion = '15.0';
+    final iosPodfile = File('ios/Podfile').readAsStringSync();
+    final iosPodPlatforms = RegExp(
+      r"^platform :ios, '([^']+)'$",
+      multiLine: true,
+    ).allMatches(iosPodfile).map((match) => match.group(1)).toList();
+    final iosDeploymentTargets = RegExp(
+      r'IPHONEOS_DEPLOYMENT_TARGET = ([^;]+);',
+    ).allMatches(iosProject).map((match) => match.group(1)).toList();
+    expect(iosPodPlatforms, <String?>[iosMinimumVersion]);
+    expect(iosDeploymentTargets, hasLength(3));
+    expect(iosDeploymentTargets, everyElement(iosMinimumVersion));
     expect(
       RegExp(
         r'CODE_SIGN_ENTITLEMENTS = Runner/Runner\.entitlements;',

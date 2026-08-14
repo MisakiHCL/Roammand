@@ -270,6 +270,16 @@ flutter build windows --release --no-pub
 
 构建产物保存在 `apps/client_flutter/build/`，并由 Git 忽略。
 
+iOS 与 iPadOS 的最低部署版本为 15.0。分发前必须检查生成的 Simulator App 和
+最终 Archive；以下两条命令都必须输出 `15.0`：
+
+```bash
+/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' \
+  apps/client_flutter/build/ios/iphonesimulator/Runner.app/Info.plist
+/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' \
+  apps/client_flutter/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist
+```
+
 ### 检查 iOS 制品中的私有 API
 
 每个 iOS 制品在分发前都必须扫描。扫描脚本支持 `.app`、`.xcarchive` 和 `.ipa`，

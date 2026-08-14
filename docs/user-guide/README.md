@@ -14,7 +14,7 @@
 - The Mac must grant Roammand Screen Recording and Accessibility access before
   it can accept a connection.
 - A Host accepts one inbound Controller session at a time.
-- The iOS source target requires iOS/iPadOS 13 or later and currently runs in
+- The iOS source target requires iOS/iPadOS 15 or later and currently runs in
   landscape. The Android source target requires Android 7.0 / API 24 or later.
 - The current release attempts direct ICE connections and has no TURN relay
   fallback. Some restrictive or symmetric network combinations may not connect.

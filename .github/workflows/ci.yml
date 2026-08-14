@@ -164,6 +164,12 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: ./scripts/check_ios_private_api.sh apps/client_flutter/build/ios/iphonesimulator/Runner.app
+      - name: Verify iOS minimum version
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' \
+            apps/client_flutter/build/ios/iphonesimulator/Runner.app/Info.plist)" = '15.0'
       - name: Test iOS private API scanner
         if: runner.os == 'macOS'
         shell: bash

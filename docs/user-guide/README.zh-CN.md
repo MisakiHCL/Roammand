@@ -13,7 +13,7 @@
 - 当前 macOS 版本要求 macOS 14.4 或更高版本。
 - Mac 必须授予 Roammand“屏幕录制”和“辅助功能”权限，之后才能接受连接。
 - 一台 Host 同时只接受一个传入 Controller 会话。
-- iOS 源码目标要求 iOS / iPadOS 13 或更高版本，当前界面固定为横屏；Android
+- iOS 源码目标要求 iOS / iPadOS 15 或更高版本，当前界面固定为横屏；Android
   源码目标要求 Android 7.0 / API 24 或更高版本。
 - 当前版本只尝试 ICE 直连，没有 TURN 中继兜底。某些严格或对称的网络组合可能
   无法连接。

@@ -131,6 +131,12 @@ done
 
 require_text "$ENGLISH_README" 'docs/self-hosting/docker-compose.md'
 require_text "$CHINESE_README" 'docs/self-hosting/docker-compose.zh-CN.md'
+require_text "$ENGLISH_README" 'iOS / iPadOS 15 or later'
+require_text "$CHINESE_README" 'iOS / iPadOS 15 或更高版本'
+require_text "$BUILDING_DOC" \
+  'The iOS and iPadOS deployment target is 15.0 or later.'
+require_text "$CHINESE_BUILDING_DOC" \
+  'iOS 与 iPadOS 的最低部署版本为 15.0。'
 
 for expected in \
   'Roammand Flutter app' \
