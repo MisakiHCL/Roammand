@@ -10,8 +10,13 @@ readonly BRIDGE_RUNTIME_DIR="/var/run/roammand"
 readonly APP_PATH="/Applications/Roammand.app"
 readonly HELPER_DIR="/Library/PrivilegedHelperTools"
 readonly SESSION_AGENT="$APP_PATH/Contents/Library/LoginItems/RoammandSessionAgent.app/Contents/MacOS/roammand-session-agent"
-readonly DAEMON_PLIST="/Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+readonly BRIDGE_SERVICE="com.hclgame.roammand.PrivilegedBridge"
+readonly LEGACY_BRIDGE_SERVICE="dev.roammand.PrivilegedBridge"
+readonly DAEMON_SOURCE="$SERVICE_DATA_DIR/launchd/$BRIDGE_SERVICE.plist"
+readonly DAEMON_PLIST="/Library/LaunchDaemons/$BRIDGE_SERVICE.plist"
+readonly LEGACY_DAEMON_PLIST="/Library/LaunchDaemons/$LEGACY_BRIDGE_SERVICE.plist"
 readonly AGENT_PLIST="/Library/LaunchAgents/dev.roammand.SessionAgent.plist"
+readonly LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 console_user="$(/usr/bin/stat -f '%Su' /dev/console)"
 case "$console_user" in
@@ -25,7 +30,7 @@ if [[ ! "$console_uid" =~ ^[0-9]+$ || "$console_uid" == "0" ]]; then
   printf 'unable to determine the Roammand owner account\n' >&2
   exit 1
 fi
-if [[ ! -d "$APP_PATH" ]]; then
+if [[ ! -d "$APP_PATH" || ! -f "$DAEMON_SOURCE" || ! -x "$LSREGISTER" ]]; then
   printf 'Roammand was not installed at the required application path\n' >&2
   exit 1
 fi
@@ -35,12 +40,12 @@ fi
   "$HELPER_DIR/roammand-host-agent" \
   "$HELPER_DIR/roammand-privileged-bridge" \
   "$SESSION_AGENT" \
-  "$DAEMON_PLIST" "$AGENT_PLIST"
+  "$DAEMON_SOURCE" "$AGENT_PLIST"
 /bin/chmod 0755 \
   "$HELPER_DIR/roammand-host-agent" \
   "$HELPER_DIR/roammand-privileged-bridge" \
   "$SESSION_AGENT"
-/bin/chmod 0644 "$DAEMON_PLIST" "$AGENT_PLIST"
+/bin/chmod 0644 "$DAEMON_SOURCE" "$AGENT_PLIST"
 /bin/chmod 0755 "$SERVICE_DATA_DIR/uninstall-macos.sh"
 
 /usr/bin/install -d -o root -g wheel -m 0755 "$BRIDGE_RUNTIME_DIR"
@@ -52,9 +57,20 @@ umask 077
 /usr/sbin/chown root:wheel "$OWNER_ID_FILE"
 /bin/chmod 0444 "$OWNER_ID_FILE"
 
-/bin/launchctl bootout system/dev.roammand.PrivilegedBridge 2>/dev/null || true
+/bin/launchctl bootout "system/$BRIDGE_SERVICE" 2>/dev/null || true
+/bin/launchctl bootout "system/$LEGACY_BRIDGE_SERVICE" 2>/dev/null || true
+/bin/rm -f "$DAEMON_PLIST" "$LEGACY_DAEMON_PLIST"
+# The daemon plist must become visible only after Launch Services knows the
+# containing app. Otherwise BTM permanently groups this system-wide item under
+# the Developer ID certificate holder on machines that saw the legacy label.
+"$LSREGISTER" -f "$APP_PATH" >/dev/null 2>&1
+/bin/launchctl asuser "$console_uid" /usr/bin/sudo -u "$console_user" \
+  "$LSREGISTER" -f "$APP_PATH" >/dev/null 2>&1
+/usr/bin/install -o root -g wheel -m 0644 "$DAEMON_SOURCE" "$DAEMON_PLIST"
 /bin/launchctl bootstrap system "$DAEMON_PLIST"
+/bin/launchctl kickstart -k "system/$BRIDGE_SERVICE"
 /bin/launchctl bootout "gui/$console_uid/dev.roammand.SessionAgent" 2>/dev/null || true
+/usr/bin/touch "$AGENT_PLIST"
 /bin/launchctl bootstrap "gui/$console_uid" "$AGENT_PLIST"
 /bin/launchctl kickstart -k "gui/$console_uid/dev.roammand.SessionAgent"
 

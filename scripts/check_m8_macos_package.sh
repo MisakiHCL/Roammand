@@ -29,9 +29,11 @@ done
 [[ -n "$PACKAGE_DIR" && -d "$PACKAGE_DIR" ]] || { printf 'package directory required\n' >&2; exit 2; }
 readonly MANIFEST="$PACKAGE_DIR/Library/Application Support/Roammand/install-manifest.sha256"
 readonly APP_INFO="$PACKAGE_DIR/Applications/Roammand.app/Contents/Info.plist"
+readonly SESSION_AGENT_PLIST="Library/LaunchAgents/dev.roammand.SessionAgent.plist"
+readonly PRIVILEGED_BRIDGE_PLIST="Library/Application Support/Roammand/launchd/com.hclgame.roammand.PrivilegedBridge.plist"
 readonly BACKGROUND_JOB_PLISTS=(
-  "Library/LaunchAgents/dev.roammand.SessionAgent.plist"
-  "Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+  "$SESSION_AGENT_PLIST"
+  "$PRIVILEGED_BRIDGE_PLIST"
 )
 
 readonly REQUIRED=(
@@ -40,7 +42,7 @@ readonly REQUIRED=(
   "Library/PrivilegedHelperTools/roammand-privileged-bridge"
   "Applications/Roammand.app/Contents/Library/LoginItems/RoammandSessionAgent.app"
   "Applications/Roammand.app/Contents/Library/LoginItems/RoammandSessionAgent.app/Contents/MacOS/roammand-session-agent"
-  "Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+  "Library/Application Support/Roammand/launchd/com.hclgame.roammand.PrivilegedBridge.plist"
   "Library/LaunchAgents/dev.roammand.SessionAgent.plist"
   "Library/Application Support/Roammand/uninstall-macos.sh"
   "Library/Application Support/Roammand/licenses/MPL-2.0.txt"
@@ -51,6 +53,15 @@ readonly REQUIRED=(
 for path in "${REQUIRED[@]}"; do
   [[ -e "$PACKAGE_DIR/$path" ]] || { printf 'missing staged macOS path: %s\n' "$path" >&2; exit 1; }
 done
+if [[ "$(plutil -extract Label raw -o - \
+    "$PACKAGE_DIR/$SESSION_AGENT_PLIST" 2>/dev/null || true)" != \
+    "dev.roammand.SessionAgent" ]] ||
+  [[ "$(plutil -extract Label raw -o - \
+    "$PACKAGE_DIR/$PRIVILEGED_BRIDGE_PLIST" 2>/dev/null || true)" != \
+    "com.hclgame.roammand.PrivilegedBridge" ]]; then
+  printf 'staged macOS background item label is invalid\n' >&2
+  exit 1
+fi
 app_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$APP_INFO" 2>/dev/null || true)"
 if [[ ! "$app_bundle_id" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$ ]]; then
   printf 'staged macOS app bundle identifier is invalid\n' >&2

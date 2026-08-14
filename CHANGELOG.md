@@ -10,6 +10,19 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-08-14
+
+### Fixed
+
+- Staged the system-wide macOS bridge definition until Launch Services has
+  registered the containing Roammand app, then installed it under a new
+  Roammand-owned service label. This prevents the all-users background item
+  from being grouped under the Developer ID certificate holder and migrates
+  the active service away from the previously attributed legacy label.
+
+Version 1.0.4 supersedes 1.0.3. The published macOS artifact is a Developer
+ID-signed, Apple-notarized, stapled package for macOS 14.4 or later.
+
 ## [1.0.3] - 2026-08-14
 
 ### Changed
@@ -126,7 +139,8 @@ Apple-notarized, stapled macOS package for macOS 14.4 or later.
 This release contains known issues and is retained only for version history. Do
 not install it; use 1.0.1 or a later release.
 
-[Unreleased]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/MisakiHCL/roammand/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MisakiHCL/roammand/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/MisakiHCL/roammand/compare/v1.0.0...v1.0.1

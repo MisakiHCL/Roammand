@@ -10,8 +10,9 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 cd "$ROOT_DIR"
 
 plutil -lint packaging/macos/*.plist packaging/macos/session-agent/Info.plist >/dev/null
-rg -q '<string>dev\.roammand\.PrivilegedBridge</string>' \
-  packaging/macos/dev.roammand.PrivilegedBridge.plist
+rg -q '<string>com\.hclgame\.roammand\.PrivilegedBridge</string>' \
+  packaging/macos/com.hclgame.roammand.PrivilegedBridge.plist
+test ! -e packaging/macos/dev.roammand.PrivilegedBridge.plist
 rg -q '<string>Aqua</string>' packaging/macos/dev.roammand.SessionAgent.plist
 rg -q '<string>LoginWindow</string>' packaging/macos/dev.roammand.SessionAgent.plist
 rg -q 'AssociatedBundleIdentifiers' scripts/package_m8_macos.sh
@@ -60,6 +61,25 @@ rg -q 'stapler staple' scripts/notarize_macos_pkg.sh
 rg -q 'spctl --assess --type install' scripts/notarize_macos_pkg.sh
 rg -q -- '--keychain-profile' scripts/notarize_macos_pkg.sh
 rg -q '/dev/console' packaging/macos/scripts/postinstall
+rg -Fq '"$LSREGISTER" -f "$APP_PATH"' packaging/macos/scripts/postinstall
+rg -Fq '/usr/bin/install -o root -g wheel -m 0644 "$DAEMON_SOURCE" "$DAEMON_PLIST"' \
+  packaging/macos/scripts/postinstall
+readonly APP_REGISTER_LINE="$(rg -n -F '"$LSREGISTER" -f "$APP_PATH"' \
+  packaging/macos/scripts/postinstall | cut -d: -f1 | head -n 1)"
+readonly DAEMON_INSTALL_LINE="$(rg -n -F '/usr/bin/install -o root -g wheel -m 0644 "$DAEMON_SOURCE" "$DAEMON_PLIST"' \
+  packaging/macos/scripts/postinstall | cut -d: -f1)"
+if [[ ! "$APP_REGISTER_LINE" =~ ^[0-9]+$ ||
+      ! "$DAEMON_INSTALL_LINE" =~ ^[0-9]+$ ||
+      "$APP_REGISTER_LINE" -ge "$DAEMON_INSTALL_LINE" ]]; then
+  printf 'macOS installer exposes the daemon plist before registering the app\n' >&2
+  exit 1
+fi
+rg -q 'dev\.roammand\.PrivilegedBridge' \
+  packaging/macos/scripts/preinstall packaging/macos/scripts/postinstall \
+  scripts/install_m8_macos.sh scripts/uninstall_m8_macos.sh
+rg -q 'com\.hclgame\.roammand\.PrivilegedBridge' \
+  packaging/macos/scripts/preinstall packaging/macos/scripts/postinstall \
+  scripts/install_m8_macos.sh scripts/uninstall_m8_macos.sh
 rg -Fq 'launchctl bootstrap "gui/$console_uid" "$AGENT_PLIST"' \
   packaging/macos/scripts/postinstall
 rg -Fq 'launchctl kickstart -k "gui/$console_uid/dev.roammand.SessionAgent"' \
@@ -148,6 +168,10 @@ fi
   --session-agent "$TEMP_DIR/roammand-session-agent" \
   --webrtc-arm64-license "$TEMP_DIR/libwebrtc-arm64-LICENSE.md" \
   --webrtc-x64-license "$TEMP_DIR/libwebrtc-x86_64-LICENSE.md"
+if [[ -e "$TEMP_DIR/package/Library/LaunchDaemons" ]]; then
+  printf 'macOS package exposes the daemon plist before app registration\n' >&2
+  exit 1
+fi
 # Staging directories produced before the safety marker existed remain
 # replaceable when their exact package layout and manifest identify them.
 rm "$TEMP_DIR/package/.roammand-package-output"
@@ -190,7 +214,7 @@ cmp "$TEMP_DIR/libwebrtc-x86_64-LICENSE.md" \
   "$TEMP_DIR/package/Library/Application Support/Roammand/licenses/libwebrtc-macos-x86_64-LICENSE.md"
 readonly BACKGROUND_JOB_PLISTS=(
   "Library/LaunchAgents/dev.roammand.SessionAgent.plist"
-  "Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+  "Library/Application Support/Roammand/launchd/com.hclgame.roammand.PrivilegedBridge.plist"
 )
 for path in "${BACKGROUND_JOB_PLISTS[@]}"; do
   test "$(plutil -extract AssociatedBundleIdentifiers.0 raw -o - \
@@ -219,6 +243,16 @@ if ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package" >/dev/null 2>&1; then
   exit 1
 fi
 cp "$TEMP_DIR/valid-session-agent.plist" "$SESSION_JOB_PLIST"
+./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
+readonly DAEMON_JOB_PLIST="$TEMP_DIR/package/Library/Application Support/Roammand/launchd/com.hclgame.roammand.PrivilegedBridge.plist"
+cp "$DAEMON_JOB_PLIST" "$TEMP_DIR/valid-daemon.plist"
+plutil -replace Label -string dev.roammand.PrivilegedBridge "$DAEMON_JOB_PLIST"
+./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
+if ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package" >/dev/null 2>&1; then
+  printf 'macOS package checker accepted the cached legacy daemon label\n' >&2
+  exit 1
+fi
+cp "$TEMP_DIR/valid-daemon.plist" "$DAEMON_JOB_PLIST"
 ./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
 if ./scripts/check_m8_macos_package.sh \
   --require-compliance "$TEMP_DIR/package" >/dev/null 2>&1; then

@@ -10,6 +10,18 @@
 
 ## [未发布]
 
+## [1.0.4] - 2026-08-14
+
+### 修复
+
+- 暂存系统级 macOS bridge 定义，等待 Launch Services 注册 Roammand 主应用后再
+  安装，并迁移到由 Roammand 命名的新服务 label。这样，“影响所有用户”的后台
+  项目不会再归到 Developer ID 证书持有人名下，同时会把活动服务迁离此前错误
+  归属的旧 label。
+
+1.0.4 已取代 1.0.3。公开 macOS 制品是适用于 macOS 14.4 或更高版本、经过
+Developer ID 签名、Apple 公证并附加公证票据的安装包。
+
 ## [1.0.3] - 2026-08-14
 
 ### 变更
@@ -110,7 +122,8 @@ ID 签名、Apple 公证并附加公证票据的安装包。
 
 该版本包含已知问题，仅保留用于版本历史。请勿安装，应使用 1.0.1 或更高版本。
 
-[未发布]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...HEAD
+[未发布]: https://github.com/MisakiHCL/roammand/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MisakiHCL/roammand/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/MisakiHCL/roammand/compare/v1.0.0...v1.0.1

@@ -114,8 +114,8 @@ rm -rf -- "$OUTPUT_DIR"
 install -d -m 0755 \
   "$OUTPUT_DIR/Applications" \
   "$OUTPUT_DIR/Library/PrivilegedHelperTools" \
-  "$OUTPUT_DIR/Library/LaunchDaemons" \
   "$OUTPUT_DIR/Library/LaunchAgents" \
+  "$OUTPUT_DIR/Library/Application Support/Roammand/launchd" \
   "$OUTPUT_DIR/Library/Application Support/Roammand/licenses"
 printf '%s\n' "$OUTPUT_DIR" >"$OUTPUT_MARKER"
 chmod 0644 "$OUTPUT_MARKER"
@@ -127,7 +127,7 @@ install -m 0755 "$BRIDGE" \
 readonly SESSION_AGENT_APP="$OUTPUT_DIR/Applications/Roammand.app/Contents/Library/LoginItems/RoammandSessionAgent.app"
 readonly SESSION_AGENT_BINARY="$SESSION_AGENT_APP/Contents/MacOS/roammand-session-agent"
 readonly SESSION_AGENT_PLIST="$OUTPUT_DIR/Library/LaunchAgents/dev.roammand.SessionAgent.plist"
-readonly PRIVILEGED_BRIDGE_PLIST="$OUTPUT_DIR/Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+readonly PRIVILEGED_BRIDGE_PLIST="$OUTPUT_DIR/Library/Application Support/Roammand/launchd/com.hclgame.roammand.PrivilegedBridge.plist"
 readonly ASSOCIATED_BUNDLE_IDENTIFIERS_KEY="AssociatedBundleIdentifiers"
 install -d -m 0755 "$SESSION_AGENT_APP/Contents/MacOS"
 install -m 0644 packaging/macos/session-agent/Info.plist \
@@ -150,7 +150,7 @@ plutil -replace CFBundleShortVersionString -string "$app_version" \
   "$SESSION_AGENT_APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$app_build" \
   "$SESSION_AGENT_APP/Contents/Info.plist"
-install -m 0644 packaging/macos/dev.roammand.PrivilegedBridge.plist \
+install -m 0644 packaging/macos/com.hclgame.roammand.PrivilegedBridge.plist \
   "$PRIVILEGED_BRIDGE_PLIST"
 install -m 0644 packaging/macos/dev.roammand.SessionAgent.plist \
   "$SESSION_AGENT_PLIST"

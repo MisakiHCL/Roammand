@@ -10,6 +10,10 @@ readonly INSTALLED_HOST_AGENT_PATTERN='^/Library/PrivilegedHelperTools/roammand-
 readonly INSTALLED_BRIDGE_PATTERN='^/Library/PrivilegedHelperTools/roammand-privileged-bridge([[:space:]]|$)'
 readonly INSTALLED_SESSION_AGENT_PATTERN='^/Applications/Roammand[.]app/Contents/Library/LoginItems/RoammandSessionAgent[.]app/Contents/MacOS/roammand-session-agent([[:space:]]|$)'
 readonly LEGACY_SESSION_AGENT_PATTERN='^/Library/PrivilegedHelperTools/roammand-session-agent([[:space:]]|$)'
+readonly BRIDGE_SERVICE="com.hclgame.roammand.PrivilegedBridge"
+readonly LEGACY_BRIDGE_SERVICE="dev.roammand.PrivilegedBridge"
+readonly BRIDGE_PLIST="/Library/LaunchDaemons/$BRIDGE_SERVICE.plist"
+readonly LEGACY_BRIDGE_PLIST="/Library/LaunchDaemons/$LEGACY_BRIDGE_SERVICE.plist"
 
 owner_id=""
 if [[ -f "$OWNER_ID_FILE" ]]; then
@@ -21,7 +25,8 @@ if [[ -n "$owner_id" ]]; then
   /bin/launchctl bootout "gui/$owner_id/dev.roammand.SessionAgent" 2>/dev/null || true
   /bin/launchctl bootout "gui/$owner_id/dev.roammand.HostAgent" 2>/dev/null || true
 fi
-/bin/launchctl bootout system/dev.roammand.PrivilegedBridge 2>/dev/null || true
+/bin/launchctl bootout "system/$BRIDGE_SERVICE" 2>/dev/null || true
+/bin/launchctl bootout "system/$LEGACY_BRIDGE_SERVICE" 2>/dev/null || true
 /usr/bin/pkill -TERM -f "$INSTALLED_HOST_AGENT_PATTERN" 2>/dev/null || true
 /usr/bin/pkill -TERM -f "$INSTALLED_BRIDGE_PATTERN" 2>/dev/null || true
 /usr/bin/pkill -TERM -f "$INSTALLED_SESSION_AGENT_PATTERN" 2>/dev/null || true
@@ -29,5 +34,6 @@ fi
 /usr/bin/pkill -TERM -f "$INSTALLED_APP_PATTERN" 2>/dev/null || true
 /bin/rm -f /var/run/roammand/bridge.sock
 /bin/rm -f /Library/PrivilegedHelperTools/roammand-session-agent
+/bin/rm -f "$BRIDGE_PLIST" "$LEGACY_BRIDGE_PLIST"
 
 exit 0

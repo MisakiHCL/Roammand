@@ -30,23 +30,35 @@ readonly SERVICE_DATA_DIR="/Library/Application Support/Roammand"
 readonly INSTALL_SECRET="$SERVICE_DATA_DIR/bridge-install-secret.bin"
 readonly OWNER_ID="$SERVICE_DATA_DIR/bridge-owner-id"
 readonly BRIDGE_RUNTIME_DIR="/var/run/roammand"
+readonly BRIDGE_SERVICE="com.hclgame.roammand.PrivilegedBridge"
+readonly LEGACY_BRIDGE_SERVICE="dev.roammand.PrivilegedBridge"
+readonly BRIDGE_SOURCE="$PACKAGE_DIR/Library/Application Support/Roammand/launchd/$BRIDGE_SERVICE.plist"
+readonly BRIDGE_PLIST="/Library/LaunchDaemons/$BRIDGE_SERVICE.plist"
+readonly LEGACY_BRIDGE_PLIST="/Library/LaunchDaemons/$LEGACY_BRIDGE_SERVICE.plist"
+readonly LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
-launchctl bootout system/dev.roammand.PrivilegedBridge 2>/dev/null || true
+[[ -f "$BRIDGE_SOURCE" && -x "$LSREGISTER" ]] || {
+  printf 'macOS bridge registration inputs are unavailable\n' >&2
+  exit 1
+}
+launchctl bootout "system/$BRIDGE_SERVICE" 2>/dev/null || true
+launchctl bootout "system/$LEGACY_BRIDGE_SERVICE" 2>/dev/null || true
 launchctl bootout "gui/$INSTALL_UID/dev.roammand.HostAgent" 2>/dev/null || true
 launchctl bootout "gui/$INSTALL_UID/dev.roammand.SessionAgent" 2>/dev/null || true
 rm -f "/Library/LaunchAgents/dev.roammand.HostAgent.plist"
 rm -f "/Library/PrivilegedHelperTools/roammand-session-agent"
+rm -f "$BRIDGE_PLIST" "$LEGACY_BRIDGE_PLIST"
 rm -rf "/Applications/Roammand.app" "$SERVICE_DATA_DIR"
 cp -R "$PACKAGE_DIR/Applications/Roammand.app" "/Applications/Roammand.app"
 install -d -o root -g wheel -m 0755 "/Library/PrivilegedHelperTools" \
   "/Library/LaunchDaemons" "/Library/LaunchAgents" \
-  "$SERVICE_DATA_DIR/licenses" "$BRIDGE_RUNTIME_DIR"
+  "$SERVICE_DATA_DIR/launchd" "$SERVICE_DATA_DIR/licenses" "$BRIDGE_RUNTIME_DIR"
 install -o root -g wheel -m 0755 "$PACKAGE_DIR/Library/PrivilegedHelperTools/"* \
   "/Library/PrivilegedHelperTools/"
-install -o root -g wheel -m 0644 "$PACKAGE_DIR/Library/LaunchDaemons/"* \
-  "/Library/LaunchDaemons/"
 install -o root -g wheel -m 0644 "$PACKAGE_DIR/Library/LaunchAgents/"* \
   "/Library/LaunchAgents/"
+install -o root -g wheel -m 0644 "$BRIDGE_SOURCE" \
+  "$SERVICE_DATA_DIR/launchd/$BRIDGE_SERVICE.plist"
 install -o root -g wheel -m 0644 \
   "$PACKAGE_DIR/Library/Application Support/Roammand/install-manifest.sha256" \
   "$SERVICE_DATA_DIR/install-manifest.sha256"
@@ -65,7 +77,11 @@ chown root:wheel "$OWNER_ID"
 chmod 0444 "$OWNER_ID"
 chown root:wheel "$BRIDGE_RUNTIME_DIR"
 chmod 0755 "$BRIDGE_RUNTIME_DIR"
-launchctl bootstrap system "/Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+"$LSREGISTER" -f "/Applications/Roammand.app" >/dev/null 2>&1
+install -o root -g wheel -m 0644 \
+  "$SERVICE_DATA_DIR/launchd/$BRIDGE_SERVICE.plist" "$BRIDGE_PLIST"
+launchctl bootstrap system "$BRIDGE_PLIST"
+launchctl kickstart -k "system/$BRIDGE_SERVICE"
 launchctl bootstrap "gui/$INSTALL_UID" "/Library/LaunchAgents/dev.roammand.SessionAgent.plist"
 launchctl kickstart -k "gui/$INSTALL_UID/dev.roammand.SessionAgent"
 printf 'macOS Host components installed; open Roammand to start its Host Agent\n'

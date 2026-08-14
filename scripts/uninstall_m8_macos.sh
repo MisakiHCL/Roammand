@@ -26,6 +26,8 @@ readonly INSTALLED_HOST_AGENT_PATTERN='^/Library/PrivilegedHelperTools/roammand-
 readonly INSTALLED_BRIDGE_PATTERN='^/Library/PrivilegedHelperTools/roammand-privileged-bridge([[:space:]]|$)'
 readonly INSTALLED_SESSION_AGENT_PATTERN='^/Applications/Roammand[.]app/Contents/Library/LoginItems/RoammandSessionAgent[.]app/Contents/MacOS/roammand-session-agent([[:space:]]|$)'
 readonly LEGACY_SESSION_AGENT_PATTERN='^/Library/PrivilegedHelperTools/roammand-session-agent([[:space:]]|$)'
+readonly BRIDGE_SERVICE="com.hclgame.roammand.PrivilegedBridge"
+readonly LEGACY_BRIDGE_SERVICE="dev.roammand.PrivilegedBridge"
 
 fail_cleanup() {
   printf 'unable to verify or completely remove Roammand local data and permissions\n' >&2
@@ -74,7 +76,8 @@ valid_bundle_id "$APP_BUNDLE_ID" || fail_cleanup
 
 launchctl bootout "gui/$OWNER_ID/dev.roammand.SessionAgent" 2>/dev/null || true
 launchctl bootout "gui/$OWNER_ID/dev.roammand.HostAgent" 2>/dev/null || true
-launchctl bootout system/dev.roammand.PrivilegedBridge 2>/dev/null || true
+launchctl bootout "system/$BRIDGE_SERVICE" 2>/dev/null || true
+launchctl bootout "system/$LEGACY_BRIDGE_SERVICE" 2>/dev/null || true
 /usr/bin/pkill -TERM -f "$INSTALLED_HOST_AGENT_PATTERN" 2>/dev/null || true
 /usr/bin/pkill -TERM -f "$INSTALLED_BRIDGE_PATTERN" 2>/dev/null || true
 /usr/bin/pkill -TERM -f "$INSTALLED_SESSION_AGENT_PATTERN" 2>/dev/null || true
@@ -106,7 +109,8 @@ rm -rf \
 rm -f "$OWNER_HOME/Library/Preferences/$APP_BUNDLE_ID.plist"
 
 pkgutil --forget "$PACKAGE_RECEIPT_ID" >/dev/null 2>&1 || true
-rm -f "/Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist" \
+rm -f "/Library/LaunchDaemons/$BRIDGE_SERVICE.plist" \
+  "/Library/LaunchDaemons/$LEGACY_BRIDGE_SERVICE.plist" \
   "/Library/LaunchAgents/dev.roammand.HostAgent.plist" \
   "/Library/LaunchAgents/dev.roammand.SessionAgent.plist" \
   "/Library/PrivilegedHelperTools/roammand-host-agent" \

@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>dev.roammand.PrivilegedBridge</string>
+  <string>com.hclgame.roammand.PrivilegedBridge</string>
   <key>ProgramArguments</key>
   <array>
     <string>/Library/PrivilegedHelperTools/roammand-privileged-bridge</string>
