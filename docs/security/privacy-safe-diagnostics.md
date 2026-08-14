@@ -38,6 +38,8 @@ Do not add a field merely because it is hashed or partially redacted. A stable h
 
 The Go signaling service logs typed event and error codes plus bounded counts or durations. It does not log frame bodies, request/device identifiers, peer addresses, credentials, or raw transport errors. Rust identity, signaling, peer, offer, candidate, lease, and input types implement redacted debug output; errors exposed across process boundaries use stable categories.
 
-`make test-m7-privacy` injects sentinel values into diagnostic and logging paths and rejects disclosure. The typed allowlist remains authoritative; every new field requires explicit schema and privacy review.
+The privacy checks in `make test-product` inject sentinel values into diagnostic
+and logging paths and reject disclosure. The typed allowlist remains
+authoritative; every new field requires explicit schema and privacy review.
 
 Users should inspect the preview and saved JSON before sharing it. Deleting the file is sufficient to remove the report; the application does not maintain a report archive.

@@ -37,6 +37,13 @@ three upstream copies of `FlutterRTCDesktopCapturer.m` (`ios`, `macos`, and
 
 Keep these three source copies synchronized when rebasing this vendored package.
 
+## Vendored documentation link
+
+The upstream `README.md` linked to a relative `CONTRIBUTING.md` that is not part
+of the published package archive. The vendored README points that link to the
+upstream project instead, so the downstream tree has no broken local document
+reference.
+
 ## Supplemental third-party license texts
 
 The upstream pub archive omits license files referenced by some bundled

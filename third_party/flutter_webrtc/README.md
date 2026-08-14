@@ -136,7 +136,7 @@ For more examples, please refer to [flutter-webrtc-demo](https://github.com/clou
 
 ### Code Contributors
 
-This project exists thanks to all the people who contribute. [[Contribute](CONTRIBUTING.md)].
+This project exists thanks to all the people who contribute. [[Contribute](https://github.com/cloudwebrtc/flutter-webrtc)].
 <a href="https://github.com/cloudwebrtc/flutter-webrtc/graphs/contributors"><img src="https://opencollective.com/flutter-webrtc/contributors.svg?width=890&button=false" /></a>
 
 ### Financial Contributors

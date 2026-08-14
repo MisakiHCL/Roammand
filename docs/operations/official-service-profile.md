@@ -2,7 +2,7 @@
 
 # Official signaling and STUN profile
 
-**English** · [简体中文](official-infrastructure-plan.zh-CN.md)
+**English** · [简体中文](official-service-profile.zh-CN.md)
 
 The current official service profile uses account-free signaling plus public STUN:
 
@@ -55,35 +55,6 @@ The signaling process listens on a private interface behind the reverse proxy.
 The proxy overwrites `X-Real-IP`, and the service trusts that header only when
 the direct peer belongs to `SIGNALING_TRUSTED_PROXY_CIDRS`. Never configure the
 whole Internet as a trusted proxy.
-
-## Release readiness
-
-Before presenting the profile as generally reliable:
-
-1. Verify WebSocket Upgrade, the required Protobuf subprotocol, disabled proxy
-   buffering, bounded timeouts, and no CDN caching.
-2. Verify UDP 3478 from an independent public network; a local STUN health check
-   is insufficient evidence for cloud firewall rules.
-3. Monitor signaling health, process restarts, rejected pairings, bounded client
-   reconnects after missing correlated heartbeat acknowledgements, certificate
-   expiry, and STUN availability without logging identifiers, session payloads,
-   or network mappings.
-4. Automate certificate renewal and deploy only a recorded signaling source
-   revision or verified artifact.
-5. Test installed macOS and Windows Hosts with physical iOS and Android
-   Controllers across separate public networks.
-6. Present a clear failure when direct ICE cannot connect. Do not imply that
-   STUN can traverse every NAT.
-7. Re-verify the published operator privacy notice before every general
-   distribution. It must continue to match the operator and monitored contact,
-   data categories and purposes, infrastructure providers, actual log/backup
-   retention, deletion and user-request paths, and its effective date. Unknown
-   operational facts remain release blockers rather than assumptions.
-
-Presence, pairing rendezvous, rate-limit windows, and active routes live in one
-signaling process and are cleared on restart. A single instance is acceptable
-for the initial service; horizontal scaling requires shared routing/state or a
-message bus rather than independent replicas behind a load balancer.
 
 ## Client integration
 

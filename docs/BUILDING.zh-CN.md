@@ -298,42 +298,6 @@ Extension，并在原始二进制字节中查找被禁止的 ReplayKit selector
 `__TEXT.__cstring`。macOS CI 会在 iOS Simulator 构建完成后立即执行扫描。发行时，
 必须在上传 App Store Connect 前分别扫描最终 Archive 和由该 Archive 导出的 IPA。
 
-## 发布通道与版本规则
-
-通过 GitHub Releases 发布的 macOS 安装包与通过 TestFlight/App Store 分发的
-iOS App 是两条独立的发布线。两端的营销版本号和构建号不要求一致。每个平台应根据
-实际包含的改动、该通道上一次已发布版本、分发要求和审核状态，独立决定版本号与
-发布时间。
-
-- 发布或标记 macOS GitHub Release，不得自动触发 iOS 发布，也不得仅为对齐版本号
-  而升级、重新构建或上传 iOS App。
-- iOS 提交、等待审核、被拒或重新提交，不得阻塞 macOS GitHub Release，也不得据此
-  重编号 macOS 版本。
-- 只有两端的发布范围和时间确实一致时，才可以主动采用相同版本号；版本一致不是
-  发布要求。
-- 每条发布记录都必须明确平台、通道、营销版本号、构建号和源码提交。仓库 tag 或
-  macOS GitHub Release 不代表同版本 iOS 构建已经存在或已经发布。
-
-`apps/client_flutter/pubspec.yaml` 中的版本只是 Flutter 工程的共享构建默认值，
-不是跨发布通道锁定版本的规则。当前 macOS 打包流程会读取该默认值。创建 iOS
-Archive 前，必须根据 App Store Connect 历史独立确定 iOS 营销版本号和构建号，
-并显式传入两个值（执行前替换下列大写占位符）：
-
-```bash
-cd apps/client_flutter
-flutter build ipa --release \
-  --build-name=IOS_MARKETING_VERSION \
-  --build-number=IOS_BUILD_NUMBER \
-  --no-pub
-```
-
-上传前必须核对 Archive 中的 `CFBundleShortVersionString` 与 `CFBundleVersion`，
-并按上文要求分别扫描 Archive 和导出的 IPA。
-发布记录应写成 `macOS GitHub Release 1.4.0 (build 18)` 或 `iOS TestFlight
-1.2.3 (build 27)` 等无歧义形式。App Store Connect 使用 Bundle ID 与版本号把构建
-关联到版本记录，并使用构建字符串唯一识别该构建；参见 Apple 的
-[构建上传说明](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds)。
-
 ## 打包可安装的 Host
 
 默认 Release 构建要求工作树干净。打包脚本只会暂存允许的 App、Agent、Bridge/Helper、服务定义、许可证、受保护卸载器和排序后的 SHA-256 清单。设备身份、授权、连接地址、凭据、私钥和本地开发者路径不会进入安装包。
@@ -354,8 +318,8 @@ macOS 合规记录，并暂存供开发验收的目录：
 
 ```bash
 make package-macos
-sudo ./scripts/install_m8_macos.sh --package dist/m8-macos --dry-run
-sudo ./scripts/install_m8_macos.sh --package dist/m8-macos
+sudo ./scripts/install_macos.sh --dry-run
+sudo ./scripts/install_macos.sh
 ```
 
 官网正式分发使用签名 `.pkg`。安装 Developer ID Application 与 Developer ID Installer、配置本地 Apple Team 后，先运行安全预检：
@@ -395,8 +359,8 @@ make release-macos
 仓库脚本仍可作为终端兜底方式，也可先预览卸载操作：
 
 ```bash
-sudo ./scripts/uninstall_m8_macos.sh --dry-run
-sudo ./scripts/uninstall_m8_macos.sh
+sudo ./scripts/uninstall_macos.sh --dry-run
+sudo ./scripts/uninstall_macos.sh
 ```
 
 ### Windows
@@ -404,20 +368,23 @@ sudo ./scripts/uninstall_m8_macos.sh
 使用管理员 PowerShell：
 
 ```powershell
-pwsh -NoProfile -File scripts/package_m8_windows.ps1
-pwsh -NoProfile -File scripts/check_m8_windows_package.ps1 -Package dist\m8-windows
-pwsh -NoProfile -File scripts/install_m8_windows.ps1 -Package dist\m8-windows -WhatIf
-pwsh -NoProfile -File scripts/install_m8_windows.ps1 -Package dist\m8-windows
+pwsh -NoProfile -File scripts/package_windows.ps1
+pwsh -NoProfile -File scripts/check_windows_package.ps1
+pwsh -NoProfile -File scripts/install_windows.ps1 -WhatIf
+pwsh -NoProfile -File scripts/install_windows.ps1
 ```
 
 预览或移除已安装组件：
 
 ```powershell
-pwsh -NoProfile -File scripts/uninstall_m8_windows.ps1 -WhatIf
-pwsh -NoProfile -File scripts/uninstall_m8_windows.ps1
+pwsh -NoProfile -File scripts/uninstall_windows.ps1 -WhatIf
+pwsh -NoProfile -File scripts/uninstall_windows.ps1
 ```
 
-macOS 卸载器会完整移除 Roammand 的设备身份、Controller 授权、已保存 Host、偏好设置、缓存，以及仅属于 Roammand 的屏幕录制和辅助功能授权。Windows 终端卸载器目前仍保留每位用户的设备身份和 Controller 授权。请使用[最终产品人工验收清单](operations/final-product-acceptance.md)在真实操作系统上验证受保护图形会话。
+macOS 卸载器会完整移除 Roammand 的设备身份、Controller 授权、已保存 Host、
+偏好设置、缓存，以及仅属于 Roammand 的屏幕录制和辅助功能授权。Windows 终端
+卸载器目前仍保留每位用户的设备身份和 Controller 授权。目标系统检查见
+[测试与验证](TESTING.zh-CN.md)。
 
 ## 配置本地 Apple 签名
 
@@ -440,16 +407,6 @@ macOS 卸载器会完整移除 Roammand 的设备身份、Controller 授权、�
 
 iOS 使用 App Store/TestFlight Archive 发行。完整 macOS Host 使用 Developer ID 签名、Hardened Runtime、签名安装器、公证和 stapling，通过官网下载发行。其需要特权组件且不使用沙盒的架构不适用于 Mac App Store；如需商店发行，必须采用独立的沙盒 Controller-only 设计。
 
-在提交公开 iOS 版本前，必须发布稳定、可公开访问的隐私政策 URL，并在 App 内易于
-找到的位置提供入口，以满足 [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
-的要求。政策与 App Store 隐私申报必须同真实 App、官方 signaling/STUN 运营、
-基础设施供应商和集成的第三方代码一致，包括数据用途、保留/删除与持续可用的
-隐私联系渠道。官方服务运营方将政策发布在
-<https://hclgame.com/roammand/privacy>，经核实的运营边界记录在
-[官方基础设施配置](operations/official-infrastructure-plan.zh-CN.md)中。隐私政策和
-App Store 申报都是发布前置；只要 App、服务部署、供应商或保留配置发生变化，就必须
-重新核对。
-
 ## 验证改动
 
 ```bash
@@ -466,4 +423,8 @@ make generate-check
 make test-conformance
 ```
 
-协议、配对、会话、Bridge、安全、自托管和运维契约分别记录在[架构](architecture/README.zh-CN.md)、[安全](security/README.zh-CN.md)、[自托管](self-hosting/docker-compose.md)和[运维](operations/README.zh-CN.md)文档中。
+协议、配对、会话、Bridge、安全、自托管和服务契约分别记录在
+[架构](architecture/README.zh-CN.md)、[安全](security/README.zh-CN.md)、
+[自托管](self-hosting/docker-compose.zh-CN.md)、
+[官方服务配置](operations/official-service-profile.zh-CN.md)和
+[测试](TESTING.zh-CN.md)文档中。

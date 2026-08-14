@@ -90,4 +90,7 @@ For trusted-LAN source development, a mobile Debug build may accept a literal pr
 
 ## Product boundaries
 
-The mobile Controller does not add background control, multi-display selection, clipboard, audio, or file transfer. Automated tests validate protocol mapping, state machines, lifecycle, and simulator builds; target-device behavior is validated through the [mobile Controller matrix](../testing/mobile-controller.md).
+The mobile Controller does not add background control, multi-display selection,
+clipboard, audio, or file transfer. Automated tests validate protocol mapping,
+state machines, lifecycle, and simulator builds; target-device behavior follows
+[Testing and verification](../TESTING.md).

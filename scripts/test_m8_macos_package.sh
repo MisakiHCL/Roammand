@@ -449,9 +449,9 @@ if ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package" >/dev/null 2>&1; then
   exit 1
 fi
 rm "$TEMP_DIR/package/unsafe-link"
-./scripts/install_m8_macos.sh --dry-run \
+./scripts/install_macos.sh --dry-run \
   --package "$TEMP_DIR/package" | rg -q 'no changes made'
-./scripts/uninstall_m8_macos.sh --dry-run | \
+./scripts/uninstall_macos.sh --dry-run | \
   rg -q 'system permissions, device identity, pairings, preferences, caches'
 
 printf 'M8 macOS package contract ok\n'

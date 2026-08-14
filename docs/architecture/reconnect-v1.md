@@ -50,4 +50,6 @@ Stale generations, expired messages, replayed nonces, mismatched identities, une
 - Failure and close cancel timers and dispose session-scoped subscriptions, channels, capture, and input state.
 - The signaling service continues to route bounded opaque envelopes. It cannot validate device grants or authorize remote control.
 
-Recovery, privacy, and resource checks are collected in [Reliability and privacy verification](../testing/reliability-and-privacy.md). Diagnostic boundaries are defined in [Privacy-safe diagnostics](../security/privacy-safe-diagnostics.md).
+Recovery, privacy, and resource checks are collected in
+[Testing and verification](../TESTING.md). Diagnostic boundaries are defined in
+[Privacy-safe diagnostics](../security/privacy-safe-diagnostics.md).
