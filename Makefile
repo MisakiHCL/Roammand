@@ -126,6 +126,7 @@ doctor:
 boundary:
 	./scripts/check_public_boundary.sh
 	./scripts/check_readme_contract.sh
+	python3 ./scripts/check_markdown_links.py
 	./scripts/test_app_workflow_contract.sh
 	./scripts/test_roammand_brand_asset_contract.sh
 	./scripts/test_roammand_product_name_contract.sh

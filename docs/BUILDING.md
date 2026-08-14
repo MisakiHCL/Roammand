@@ -330,47 +330,6 @@ macOS CI runs this scan immediately after its iOS Simulator build. For a release
 scan both the final Archive and exported IPA produced from that Archive before
 uploading either build to App Store Connect.
 
-## Release channels and versioning
-
-The macOS package published through GitHub Releases and the iOS app distributed
-through TestFlight/App Store are independent release trains. Their marketing
-versions and build numbers do not need to match. Choose each platform's version
-and release date from the changes it actually ships, its previous release in
-that channel, distribution requirements, and review state.
-
-- Publishing or tagging a macOS GitHub Release must not automatically trigger,
-  bump, rebuild, or upload an iOS release.
-- An iOS submission, review wait, rejection, or resubmission must not delay or
-  renumber a macOS GitHub Release.
-- Matching versions are optional and should be used only when both platforms'
-  release scope and timing genuinely align.
-- Every release record must identify the platform, channel, marketing version,
-  build number, and source commit. A repository tag or macOS GitHub Release does
-  not claim that an iOS build with the same version exists or has shipped.
-
-The version in `apps/client_flutter/pubspec.yaml` is the Flutter project's
-shared build default, not a cross-channel version-locking policy. The current
-macOS packaging workflow consumes that default. Before creating an iOS Archive,
-choose the iOS marketing version and build number independently from the App
-Store Connect history, then pass both values explicitly (replace the uppercase
-placeholders):
-
-```bash
-cd apps/client_flutter
-flutter build ipa --release \
-  --build-name=IOS_MARKETING_VERSION \
-  --build-number=IOS_BUILD_NUMBER \
-  --no-pub
-```
-
-Before upload, verify `CFBundleShortVersionString` and `CFBundleVersion` in the
-Archive, then run the private API scan above against both the Archive and the
-exported IPA. Record releases unambiguously, for example, `macOS GitHub Release
-1.4.0 (build 18)` or `iOS TestFlight 1.2.3 (build 27)`. App Store Connect uses
-the bundle ID and version to associate a build with its version record and the
-build string to identify that build uniquely; see Apple's
-[build upload guidance](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds).
-
 ## Package the installed Host
 
 Package scripts require a clean worktree for their default Release build. They stage only allowlisted apps, agents, bridge/helpers, service definitions, licenses, a protected uninstaller, and a sorted SHA-256 manifest. Device identities, grants, endpoints, credentials, private keys, and local developer paths are excluded.
@@ -396,8 +355,8 @@ used for development acceptance:
 
 ```bash
 make package-macos
-sudo ./scripts/install_m8_macos.sh --package dist/m8-macos --dry-run
-sudo ./scripts/install_m8_macos.sh --package dist/m8-macos
+sudo ./scripts/install_macos.sh --dry-run
+sudo ./scripts/install_macos.sh
 ```
 
 Website distribution uses a signed installer package. After installing
@@ -462,8 +421,8 @@ The repository script remains available as a terminal fallback or dry-run
 preview:
 
 ```bash
-sudo ./scripts/uninstall_m8_macos.sh --dry-run
-sudo ./scripts/uninstall_m8_macos.sh
+sudo ./scripts/uninstall_macos.sh --dry-run
+sudo ./scripts/uninstall_macos.sh
 ```
 
 ### Windows
@@ -471,20 +430,24 @@ sudo ./scripts/uninstall_m8_macos.sh
 Use an elevated PowerShell:
 
 ```powershell
-pwsh -NoProfile -File scripts/package_m8_windows.ps1
-pwsh -NoProfile -File scripts/check_m8_windows_package.ps1 -Package dist\m8-windows
-pwsh -NoProfile -File scripts/install_m8_windows.ps1 -Package dist\m8-windows -WhatIf
-pwsh -NoProfile -File scripts/install_m8_windows.ps1 -Package dist\m8-windows
+pwsh -NoProfile -File scripts/package_windows.ps1
+pwsh -NoProfile -File scripts/check_windows_package.ps1
+pwsh -NoProfile -File scripts/install_windows.ps1 -WhatIf
+pwsh -NoProfile -File scripts/install_windows.ps1
 ```
 
 Preview and remove installed components with:
 
 ```powershell
-pwsh -NoProfile -File scripts/uninstall_m8_windows.ps1 -WhatIf
-pwsh -NoProfile -File scripts/uninstall_m8_windows.ps1
+pwsh -NoProfile -File scripts/uninstall_windows.ps1 -WhatIf
+pwsh -NoProfile -File scripts/uninstall_windows.ps1
 ```
 
-The macOS uninstaller completely removes Roammand's device identity, Controller grants, saved Hosts, preferences, caches, and app-specific Screen Recording and Accessibility decisions. The Windows fallback currently preserves each user's device identity and Controller grants. Use the [final product acceptance checklist](operations/final-product-acceptance.md) to validate protected graphical sessions on real operating systems.
+The macOS uninstaller completely removes Roammand's device identity, Controller
+grants, saved Hosts, preferences, caches, and app-specific Screen Recording and
+Accessibility decisions. The Windows fallback currently preserves each user's
+device identity and Controller grants. Follow
+[Testing and verification](TESTING.md) for target-system checks.
 
 ## Configure local Apple signing
 
@@ -508,20 +471,6 @@ printing the Team ID, bundle ID, or signing identity:
 
 iOS distribution uses App Store/TestFlight archives. The complete macOS Host uses Developer ID signing, Hardened Runtime, a signed installer, notarization, and stapling for direct distribution. Its privileged non-sandboxed architecture is not a Mac App Store target; a store-distributed macOS app requires a separate sandboxed Controller-only design.
 
-Before a public iOS submission, publish a stable, publicly accessible privacy
-policy URL and expose that policy from an easy-to-find place in the app, as
-required by the [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/).
-The policy and App Store privacy answers must match the actual app, official
-signaling/STUN operation, infrastructure providers, and integrated third-party
-code, including data purposes, retention/deletion, and a monitored privacy
-contact. The official service operator publishes the policy at
-<https://hclgame.com/roammand/privacy>; the verified operational boundary is
-recorded in the
-[official infrastructure profile](operations/official-infrastructure-plan.md).
-Treat both the policy and the App Store declarations as release prerequisites,
-and re-verify them whenever the app, service deployment, provider, or retention
-configuration changes.
-
 ## Verify changes
 
 ```bash
@@ -538,4 +487,8 @@ make generate-check
 make test-conformance
 ```
 
-Protocol, pairing, session, bridge, security, self-hosting, and operations contracts are collected in the [architecture](architecture/README.md), [security](security/README.md), [self-hosting](self-hosting/docker-compose.md), and [operations](operations/README.md) guides.
+Protocol, pairing, session, bridge, security, self-hosting, and service contracts
+are collected in the [architecture](architecture/README.md),
+[security](security/README.md), [self-hosting](self-hosting/docker-compose.md),
+[official service profile](operations/official-service-profile.md), and
+[testing](TESTING.md) guides.

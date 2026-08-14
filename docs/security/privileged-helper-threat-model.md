@@ -62,5 +62,5 @@ code-signing, or administrator approval. FileVault preboot is not supported.
 Deterministic tests cover malformed authentication, peer mismatch, replay,
 framing limits, state transitions, stale leases, protected-indicator behavior,
 redaction, and package layout. UAC, Winlogon, Ctrl+Alt+Del, LoginWindow, TCC,
-and lock-screen behavior require target-system evidence in the
-[platform acceptance matrix](../testing/platform-acceptance.md).
+and lock-screen behavior require the installed target-system checks in
+[Testing and verification](../TESTING.md).

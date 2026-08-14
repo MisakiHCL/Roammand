@@ -150,6 +150,12 @@ silently falling back.
 
 ## Verification
 
-Run `make test-m4` for the automated vertical-slice gate. It covers signed negotiation state machines, native Host peer construction on supported build hosts, exact channel contracts, signaling reconnect/routing, input cleanup, ten connect/close cycles, strict optional configuration parsing, and a desktop Debug build.
+Run `make test-product` for the complete automated gate. It covers signed
+negotiation state machines, native Host peer construction on supported build
+hosts, exact channel contracts, signaling reconnect/routing, input cleanup,
+repeated connect/close cycles, strict optional configuration parsing, and a
+desktop Debug build.
 
-Automated tests validate the protocol and lifecycle contracts. Real capture, operating-system input injection, NAT traversal, and TURN operation require target-device validation through the [desktop session matrix](../testing/desktop-session.md).
+Automated tests validate the protocol and lifecycle contracts. Real capture,
+operating-system input injection, NAT traversal, and optional TURN operation
+require the target-system checks in [Testing and verification](../TESTING.md).

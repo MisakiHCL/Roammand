@@ -13,18 +13,19 @@ readonly REQUIRED_PUBLIC_FILES=(
   "SECURITY.md"
   "LICENSES.md"
   "docs/BUILDING.md"
+  "docs/BUILDING.zh-CN.md"
+  "docs/TESTING.md"
+  "docs/TESTING.zh-CN.md"
   "docs/architecture/desktop-identity-ipc-v1.md"
   "docs/architecture/account-free-pairing-v1.md"
   "docs/architecture/reconnect-v1.md"
   "docs/architecture/privileged-session-bridge-v1.md"
   "docs/security/privacy-safe-diagnostics.md"
   "docs/security/privileged-helper-threat-model.md"
-  "docs/operations/final-product-acceptance.md"
+  "docs/operations/official-service-profile.md"
+  "docs/operations/official-service-profile.zh-CN.md"
   "docs/self-hosting/docker-compose.md"
   "docs/self-hosting/docker-compose.zh-CN.md"
-  "docs/testing/pairing.md"
-  "docs/testing/reliability-and-privacy.md"
-  "docs/testing/platform-acceptance.md"
   "licenses/MPL-2.0.txt"
   "licenses/AGPL-3.0-only.txt"
   "licenses/Apache-2.0.txt"
@@ -34,6 +35,7 @@ readonly FORBIDDEN_PATTERNS=(
   "../internal/"
   ".superpowers/brainstorm"
 )
+readonly FORBIDDEN_PUBLIC_MARKDOWN_PATTERN='\bM[0-9]+\b|test-m[0-9]+|package_m[0-9]+|install_m[0-9]+|uninstall_m[0-9]+|dist[/\\]m[0-9]+|final-product-acceptance|official-infrastructure-plan|docs/testing/|Implementation status|Development status|Developer preview|Release status|current checkout|early development|later milestones?|future AI capability|product roadmap|implementation plan|discussion notes|conversation transcript|decision log|rejected alternatives|work log|实现状态|开发状态|发行状态|当前检出|早期开发|后续里程碑|尚未实现的 AI 功能|产品规划|产品路线图|讨论记录|对话记录|聊天记录|实施计划|工作日志|被否决方案'
 
 is_sensitive_tracked_file() {
   local path="$1"
@@ -71,6 +73,27 @@ for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
   fi
 done
 
+if rg --quiet --hidden --ignore-case \
+  --glob '!.git' \
+  --glob '!.git/**' \
+  --glob '!third_party/**' \
+  --glob '!scripts/macos_release_compliance/vetted_notices/**' \
+  --glob '*.md' \
+  "$FORBIDDEN_PUBLIC_MARKDOWN_PATTERN" .; then
+  printf 'public Markdown contains internal process or milestone terminology\n' >&2
+  exit 1
+fi
+
+while IFS= read -r markdown_file; do
+  [[ -f "$markdown_file" ]] || continue
+  if rg --quiet --ignore-case \
+    '(^|/)(plans?|roadmap|conversations?|chat|.*acceptance.*)\.md$' \
+    <<<"$markdown_file"; then
+    printf 'internal planning or acceptance document is tracked publicly\n' >&2
+    exit 1
+  fi
+done < <(git ls-files --cached --others --exclude-standard '*.md' '*.MD')
+
 if rg --quiet --hidden \
   --glob '!.git' \
   --glob '!.git/**' \
@@ -81,11 +104,12 @@ if rg --quiet --hidden \
 fi
 
 while IFS= read -r -d '' tracked_file; do
+  [[ -f "$tracked_file" ]] || continue
   if is_sensitive_tracked_file "$tracked_file"; then
     printf 'sensitive Apple release file is tracked\n' >&2
     exit 1
   fi
-done < <(git ls-files -z)
+done < <(git ls-files -z --cached --others --exclude-standard)
 
 if git grep --quiet -I -E -- \
   '-----BEGIN ([A-Z0-9]+ )?PRIVATE KEY-----'; then

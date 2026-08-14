@@ -22,6 +22,13 @@ script remains the terminal fallback and supports `--dry-run`.
 Use the repository scripts to stage, verify, install, or uninstall. Run the
 install and uninstall scripts with `--dry-run` first to inspect every action.
 
+```bash
+make package-macos
+sudo ./scripts/install_macos.sh --dry-run
+sudo ./scripts/install_macos.sh
+sudo ./scripts/uninstall_macos.sh --dry-run
+```
+
 Direct website distribution uses `make package-macos-signed` to sign all code
 with Developer ID Application and Hardened Runtime, regenerate the manifest,
 and create a Developer ID Installer-signed `dist/apple-release/Roammand.pkg`.

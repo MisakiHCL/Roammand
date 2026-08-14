@@ -14,6 +14,9 @@ and released versions follow semantic versioning.
 
 - Raised the iOS and iPadOS minimum deployment target from 13.0 to 15.0 for
   App Store Connect compatibility beginning in spring 2027.
+- Consolidated public verification guidance, separated current official-service
+  facts from maintainer readiness procedures, and exposed stable platform
+  packaging script names instead of milestone-oriented names.
 
 ### Fixed
 

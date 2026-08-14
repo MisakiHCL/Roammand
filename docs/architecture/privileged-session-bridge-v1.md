@@ -105,5 +105,5 @@ automatic updates.
 
 Repository tests verify protocol, leases, authentication, state transitions,
 UI behavior, and package layout. Windows secure desktop and macOS LoginWindow
-behavior require target-system validation through the
-[platform acceptance matrix](../testing/platform-acceptance.md).
+behavior require the installed target-system checks in
+[Testing and verification](../TESTING.md).

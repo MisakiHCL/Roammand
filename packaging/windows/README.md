@@ -18,3 +18,11 @@ a restart recovery policy.
 Run the install and uninstall scripts with `-WhatIf` first. Uninstall removes
 program and service data while preserving each user's device identity and
 Controller grants.
+
+```powershell
+pwsh -NoProfile -File scripts/package_windows.ps1
+pwsh -NoProfile -File scripts/check_windows_package.ps1
+pwsh -NoProfile -File scripts/install_windows.ps1 -WhatIf
+pwsh -NoProfile -File scripts/install_windows.ps1
+pwsh -NoProfile -File scripts/uninstall_windows.ps1 -WhatIf
+```
