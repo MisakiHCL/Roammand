@@ -10,6 +10,8 @@
 
 ## [未发布]
 
+## [1.0.3] - 2026-08-14
+
 ### 变更
 
 - 将 iOS 与 iPadOS 最低部署版本从 13.0 提升至 15.0，以满足 App Store Connect
@@ -19,11 +21,17 @@
 
 ### 修复
 
+- 将 macOS 安装包中的 LaunchAgent 与 LaunchDaemon 关联到 Roammand 主应用，
+  使“系统设置”显示产品名称和图标，而不是把后台项目归到 Developer ID
+  证书持有人名下。
 - 串行执行二维码扫描器的生命周期命令；如果相机权限请求在 iOS App 进入后台后才
   完成，会立即暂停扫描，也不会被过期的前台事件错误恢复。
 - 将托管的 `flutter_webrtc` 替换为仓库内可复现的 1.5.2 下游补丁，移除 iOS 与
   macOS 构建中未使用的 ReplayKit 私有 selector，并增加发行扫描器，在分发前拒绝
   仍包含该 selector 的 iOS 制品。
+
+1.0.3 已取代 1.0.2。公开 macOS 制品是适用于 macOS 14.4 或更高版本、经过
+Developer ID 签名、Apple 公证并附加公证票据的安装包。
 
 ## [1.0.2] - 2026-07-21
 
@@ -102,7 +110,8 @@ ID 签名、Apple 公证并附加公证票据的安装包。
 
 该版本包含已知问题，仅保留用于版本历史。请勿安装，应使用 1.0.1 或更高版本。
 
-[未发布]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...HEAD
+[未发布]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MisakiHCL/roammand/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/MisakiHCL/roammand/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/MisakiHCL/roammand/releases/tag/v1.0.0

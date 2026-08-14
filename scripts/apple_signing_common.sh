@@ -58,7 +58,7 @@ apple_load_signing_config() {
 apple_find_identity_hash() {
   local certificate_type="$1"
   local policy="$2"
-  local identities matches count
+  local identities matches count identity_override=""
 
   identities="$(security find-identity -v -p "$policy" 2>/dev/null || true)"
   matches="$(printf '%s\n' "$identities" | awk \
@@ -70,6 +70,28 @@ apple_find_identity_hash() {
         print $2
       }
     ')"
+  case "$certificate_type" in
+    'Developer ID Application')
+      identity_override="${ROAMMAND_APPLE_APPLICATION_IDENTITY_SHA1:-}"
+      ;;
+    'Developer ID Installer')
+      identity_override="${ROAMMAND_APPLE_INSTALLER_IDENTITY_SHA1:-}"
+      ;;
+  esac
+  if [[ -n "$identity_override" ]]; then
+    identity_override="$(printf '%s' "$identity_override" | tr '[:lower:]' '[:upper:]')"
+    if [[ ! "$identity_override" =~ ^[0-9A-F]{40}$ ]] ||
+      ! printf '%s\n' "$matches" | awk -v expected="$identity_override" '
+        toupper($0) == expected { found += 1 }
+        END { exit found != 1 }
+      '; then
+      printf 'configured %s identity is not a matching valid Keychain identity\n' \
+        "$certificate_type" >&2
+      return 1
+    fi
+    printf '%s\n' "$identity_override"
+    return 0
+  fi
   count="$(printf '%s\n' "$matches" | awk 'NF { count += 1 } END { print count + 0 }')"
   if [[ "$count" -ne 1 ]]; then
     printf 'expected exactly one matching %s identity in Keychain\n' \

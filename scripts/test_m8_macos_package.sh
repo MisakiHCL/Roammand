@@ -14,6 +14,7 @@ rg -q '<string>dev\.roammand\.PrivilegedBridge</string>' \
   packaging/macos/dev.roammand.PrivilegedBridge.plist
 rg -q '<string>Aqua</string>' packaging/macos/dev.roammand.SessionAgent.plist
 rg -q '<string>LoginWindow</string>' packaging/macos/dev.roammand.SessionAgent.plist
+rg -q 'AssociatedBundleIdentifiers' scripts/package_m8_macos.sh
 test ! -e packaging/macos/dev.roammand.HostAgent.plist
 test "$(rg -c 'MACOSX_DEPLOYMENT_TARGET = 14\.4;' apps/client_flutter/macos/Runner.xcodeproj/project.pbxproj)" -eq 3
 test "$(rg -c 'ENABLE_HARDENED_RUNTIME = YES;' apps/client_flutter/macos/Runner.xcodeproj/project.pbxproj)" -eq 1
@@ -187,7 +188,38 @@ cmp "$TEMP_DIR/libwebrtc-arm64-LICENSE.md" \
   "$TEMP_DIR/package/Library/Application Support/Roammand/licenses/libwebrtc-macos-arm64-LICENSE.md"
 cmp "$TEMP_DIR/libwebrtc-x86_64-LICENSE.md" \
   "$TEMP_DIR/package/Library/Application Support/Roammand/licenses/libwebrtc-macos-x86_64-LICENSE.md"
+readonly BACKGROUND_JOB_PLISTS=(
+  "Library/LaunchAgents/dev.roammand.SessionAgent.plist"
+  "Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+)
+for path in "${BACKGROUND_JOB_PLISTS[@]}"; do
+  test "$(plutil -extract AssociatedBundleIdentifiers.0 raw -o - \
+    "$TEMP_DIR/package/$path")" = "dev.roammand.controller"
+  if plutil -extract AssociatedBundleIdentifiers.1 raw -o - \
+    "$TEMP_DIR/package/$path" >/dev/null 2>&1; then
+    printf 'macOS background item has multiple app associations\n' >&2
+    exit 1
+  fi
+done
 ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package"
+readonly SESSION_JOB_PLIST="$TEMP_DIR/package/Library/LaunchAgents/dev.roammand.SessionAgent.plist"
+cp "$SESSION_JOB_PLIST" "$TEMP_DIR/valid-session-agent.plist"
+plutil -remove AssociatedBundleIdentifiers "$SESSION_JOB_PLIST"
+./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
+if ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package" >/dev/null 2>&1; then
+  printf 'macOS package checker accepted a background item without an app association\n' >&2
+  exit 1
+fi
+cp "$TEMP_DIR/valid-session-agent.plist" "$SESSION_JOB_PLIST"
+plutil -replace AssociatedBundleIdentifiers.0 \
+  -string dev.roammand.different "$SESSION_JOB_PLIST"
+./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
+if ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package" >/dev/null 2>&1; then
+  printf 'macOS package checker accepted a mismatched background item association\n' >&2
+  exit 1
+fi
+cp "$TEMP_DIR/valid-session-agent.plist" "$SESSION_JOB_PLIST"
+./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
 if ./scripts/check_m8_macos_package.sh \
   --require-compliance "$TEMP_DIR/package" >/dev/null 2>&1; then
   printf 'strict macOS package check accepted missing compliance assets\n' >&2

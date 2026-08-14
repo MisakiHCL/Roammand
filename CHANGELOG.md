@@ -10,6 +10,8 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-14
+
 ### Changed
 
 - Raised the iOS and iPadOS minimum deployment target from 13.0 to 15.0 for
@@ -20,6 +22,9 @@ and released versions follow semantic versioning.
 
 ### Fixed
 
+- Associated the packaged macOS LaunchAgent and LaunchDaemon with the main
+  Roammand app so System Settings shows the product name and icon instead of
+  grouping background items under the Developer ID certificate holder.
 - Serialized QR scanner lifecycle commands so a camera permission request that
   completes after iOS backgrounds the app is immediately paused and cannot be
   resumed by a stale foreground event.
@@ -27,6 +32,9 @@ and released versions follow semantic versioning.
   repository-local 1.5.2 downstream patch that removes an unused private
   ReplayKit selector from iOS and macOS builds, and added a release scanner
   that rejects affected iOS artifacts before distribution.
+
+Version 1.0.3 supersedes 1.0.2. The published macOS artifact is a Developer
+ID-signed, Apple-notarized, stapled package for macOS 14.4 or later.
 
 ## [1.0.2] - 2026-07-21
 
@@ -118,7 +126,8 @@ Apple-notarized, stapled macOS package for macOS 14.4 or later.
 This release contains known issues and is retained only for version history. Do
 not install it; use 1.0.1 or a later release.
 
-[Unreleased]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MisakiHCL/roammand/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/MisakiHCL/roammand/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/MisakiHCL/roammand/releases/tag/v1.0.0

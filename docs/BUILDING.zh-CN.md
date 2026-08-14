@@ -350,6 +350,17 @@ make release-macos
 
 该目标使用 `roammand-notary` Keychain profile 提交 Apple notary service，等待 `Accepted`，staple 最终 `.pkg`，并执行 stapler 与 Gatekeeper 验证。原始身份和凭据不会打印；失败的公证日志只保存在被 Git 忽略的 `dist/apple-release/`。
 
+如果 Keychain 中同一 Developer ID 类型存在多个有效身份，可以明确指定本次使用的
+证书，而无需删除其他证书：
+
+```bash
+ROAMMAND_APPLE_APPLICATION_IDENTITY_SHA1=APPLICATION_CERTIFICATE_SHA1 \
+ROAMMAND_APPLE_INSTALLER_IDENTITY_SHA1=INSTALLER_CERTIFICATE_SHA1 \
+make release-macos
+```
+
+每个选择值都必须是配置 Apple Team 下对应证书类型的有效身份 SHA-1 哈希。
+
 安装器会把包含嵌套 Session Agent 的 `Roammand.app` 放入 `/Applications`，将 Host 与特权二进制放入 `/Library/PrivilegedHelperTools`，并将受保护会话的 launchd 定义放入 `/Library/LaunchDaemons` 和 `/Library/LaunchAgents`。安装器会立即把 Session Agent 加载到当前图形会话，无需注销或重新登录。打开 GUI 会启动已安装的 Host Agent；关闭窗口时 GUI 与 Agent 会继续在托盘运行，只有明确选择“退出”才会停止由该 GUI 启动的 Agent。
 
 安装版会提供“**设置 → 高级 → 卸载 Roammand**”。该操作会请求管理员授权，停止已安装的服务，并完整移除 App、后台组件、本地数据和仅属于 Roammand 的系统授权。开发构建中的卸载入口保持禁用，避免误删另一份正式安装版本。

@@ -398,6 +398,18 @@ This submits through the `roammand-notary` Keychain profile, waits for an
 validation. Raw identities and credentials aren't printed. A failed
 notarization log stays under ignored `dist/apple-release/`.
 
+If the Keychain contains more than one valid identity of the same Developer ID
+type, select the intended certificates explicitly without deleting the others:
+
+```bash
+ROAMMAND_APPLE_APPLICATION_IDENTITY_SHA1=APPLICATION_CERTIFICATE_SHA1 \
+ROAMMAND_APPLE_INSTALLER_IDENTITY_SHA1=INSTALLER_CERTIFICATE_SHA1 \
+make release-macos
+```
+
+Each selector must be the SHA-1 hash of a valid identity for the configured
+Apple Team and certificate type.
+
 The installer places `Roammand.app`, including its nested Session Agent, in `/Applications`, installed Host and
 privileged binaries in `/Library/PrivilegedHelperTools`, and protected-session
 launchd definitions in `/Library/LaunchDaemons` and `/Library/LaunchAgents`.

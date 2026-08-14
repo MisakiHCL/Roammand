@@ -28,6 +28,11 @@ done
 
 [[ -n "$PACKAGE_DIR" && -d "$PACKAGE_DIR" ]] || { printf 'package directory required\n' >&2; exit 2; }
 readonly MANIFEST="$PACKAGE_DIR/Library/Application Support/Roammand/install-manifest.sha256"
+readonly APP_INFO="$PACKAGE_DIR/Applications/Roammand.app/Contents/Info.plist"
+readonly BACKGROUND_JOB_PLISTS=(
+  "Library/LaunchAgents/dev.roammand.SessionAgent.plist"
+  "Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+)
 
 readonly REQUIRED=(
   "Applications/Roammand.app"
@@ -45,6 +50,23 @@ readonly REQUIRED=(
 )
 for path in "${REQUIRED[@]}"; do
   [[ -e "$PACKAGE_DIR/$path" ]] || { printf 'missing staged macOS path: %s\n' "$path" >&2; exit 1; }
+done
+app_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$APP_INFO" 2>/dev/null || true)"
+if [[ ! "$app_bundle_id" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9][A-Za-z0-9-]*)+$ ]]; then
+  printf 'staged macOS app bundle identifier is invalid\n' >&2
+  exit 1
+fi
+for path in "${BACKGROUND_JOB_PLISTS[@]}"; do
+  job_plist="$PACKAGE_DIR/$path"
+  associated_bundle_id="$(plutil -extract AssociatedBundleIdentifiers.0 \
+    raw -o - "$job_plist" 2>/dev/null || true)"
+  if [[ "$associated_bundle_id" != "$app_bundle_id" ]] ||
+    plutil -extract AssociatedBundleIdentifiers.1 raw -o - \
+      "$job_plist" >/dev/null 2>&1; then
+    printf 'staged macOS background item is not associated with the app: %s\n' \
+      "$path" >&2
+    exit 1
+  fi
 done
 for path in \
   "Library/Application Support/Roammand/licenses/libwebrtc-macos-arm64-LICENSE.md" \

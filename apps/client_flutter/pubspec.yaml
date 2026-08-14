@@ -1,7 +1,7 @@
 name: roammand
 description: Account-free remote control for your own computers.
 publish_to: none
-version: 1.0.2+5
+version: 1.0.3+6
 
 environment:
   sdk: '>=3.12.0 <4.0.0'

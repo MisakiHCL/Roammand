@@ -126,6 +126,9 @@ install -m 0755 "$BRIDGE" \
   "$OUTPUT_DIR/Library/PrivilegedHelperTools/roammand-privileged-bridge"
 readonly SESSION_AGENT_APP="$OUTPUT_DIR/Applications/Roammand.app/Contents/Library/LoginItems/RoammandSessionAgent.app"
 readonly SESSION_AGENT_BINARY="$SESSION_AGENT_APP/Contents/MacOS/roammand-session-agent"
+readonly SESSION_AGENT_PLIST="$OUTPUT_DIR/Library/LaunchAgents/dev.roammand.SessionAgent.plist"
+readonly PRIVILEGED_BRIDGE_PLIST="$OUTPUT_DIR/Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+readonly ASSOCIATED_BUNDLE_IDENTIFIERS_KEY="AssociatedBundleIdentifiers"
 install -d -m 0755 "$SESSION_AGENT_APP/Contents/MacOS"
 install -m 0644 packaging/macos/session-agent/Info.plist \
   "$SESSION_AGENT_APP/Contents/Info.plist"
@@ -148,9 +151,19 @@ plutil -replace CFBundleShortVersionString -string "$app_version" \
 plutil -replace CFBundleVersion -string "$app_build" \
   "$SESSION_AGENT_APP/Contents/Info.plist"
 install -m 0644 packaging/macos/dev.roammand.PrivilegedBridge.plist \
-  "$OUTPUT_DIR/Library/LaunchDaemons/dev.roammand.PrivilegedBridge.plist"
+  "$PRIVILEGED_BRIDGE_PLIST"
 install -m 0644 packaging/macos/dev.roammand.SessionAgent.plist \
-  "$OUTPUT_DIR/Library/LaunchAgents/"
+  "$SESSION_AGENT_PLIST"
+for job_plist in "$SESSION_AGENT_PLIST" "$PRIVILEGED_BRIDGE_PLIST"; do
+  plutil -insert "$ASSOCIATED_BUNDLE_IDENTIFIERS_KEY" -array "$job_plist"
+  plutil -insert "${ASSOCIATED_BUNDLE_IDENTIFIERS_KEY}.0" \
+    -string "$app_bundle_id" "$job_plist"
+  if [[ "$(plutil -extract "${ASSOCIATED_BUNDLE_IDENTIFIERS_KEY}.0" \
+    raw -o - "$job_plist" 2>/dev/null || true)" != "$app_bundle_id" ]]; then
+    printf 'staged macOS background item association is invalid\n' >&2
+    exit 1
+  fi
+done
 install -m 0644 licenses/MPL-2.0.txt licenses/Apache-2.0.txt \
   "$OUTPUT_DIR/Library/Application Support/Roammand/licenses/"
 install -m 0644 "$WEBRTC_ARM64_LICENSE" \
