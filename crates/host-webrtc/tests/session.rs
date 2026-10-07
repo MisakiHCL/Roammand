@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use roammand_host_webrtc::{
     DATA_CHANNEL_INPUT_RELIABLE, DATA_CHANNEL_POINTER_FAST, DataChannelReliability,
-    HostPeerSession, HostSessionState, IceTransportPolicy, PeerAnswer, PeerBackend,
-    PeerIceCandidate, RemoteInputSink, SessionConfig, SessionGate, VideoCodec,
+    HostPeerSession, HostSessionState, HostWebRtcError, IceTransportPolicy, PeerAnswer,
+    PeerBackend, PeerIceCandidate, RemoteInputSink, SessionConfig, SessionGate, VideoCodec,
 };
 use roammand_protocol::roammand::v1::SessionPermission;
 
@@ -87,6 +87,51 @@ fn failed_peer_start_closes_every_partially_created_resource() {
         *operations.lock().expect("operations lock"),
         vec!["peer-start", "input-release-all", "peer-close"]
     );
+}
+
+#[test]
+fn closed_session_retries_failed_input_cleanup_on_close_or_drop() {
+    for retry_on_drop in [false, true] {
+        let operations = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let mut input = FakeInput::new(Arc::clone(&operations));
+        input.fail_release_once = true;
+        let mut session = HostPeerSession::new(
+            vec![0x71; 16],
+            &[
+                SessionPermission::ViewScreen,
+                SessionPermission::ControlInput,
+            ],
+            SessionConfig::new(IceTransportPolicy::All),
+            Box::new(FakePeer::new(Arc::clone(&operations))),
+            Box::new(input),
+        )
+        .expect("session inputs must be valid");
+        session
+            .accept_offer("v=0\r\n")
+            .expect("offer must negotiate");
+        session.mark_connected().expect("session must connect");
+
+        assert_eq!(session.close(), Err(HostWebRtcError::InputFailure));
+        assert_eq!(session.state(), HostSessionState::Closed);
+        assert!(session.mark_connected().is_err());
+        if !retry_on_drop {
+            session.close().expect("failed input cleanup must retry");
+            session
+                .close()
+                .expect("successful cleanup must be idempotent");
+        }
+        drop(session);
+        assert_eq!(
+            *operations.lock().expect("operations lock"),
+            vec![
+                "peer-start",
+                "input-release-all",
+                "peer-close",
+                "input-release-all"
+            ],
+            "retry_on_drop={retry_on_drop}"
+        );
+    }
 }
 
 #[test]
@@ -260,6 +305,7 @@ impl PeerBackend for FakePeer {
 
 struct FakeInput {
     operations: Arc<Mutex<Vec<&'static str>>>,
+    fail_release_once: bool,
 }
 
 struct FailingStartPeer {
@@ -296,7 +342,10 @@ impl PeerBackend for FailingStartPeer {
 
 impl FakeInput {
     fn new(operations: Arc<Mutex<Vec<&'static str>>>) -> Self {
-        Self { operations }
+        Self {
+            operations,
+            fail_release_once: false,
+        }
     }
 }
 
@@ -306,6 +355,10 @@ impl RemoteInputSink for FakeInput {
             .lock()
             .expect("operations lock")
             .push("input-release-all");
+        if self.fail_release_once {
+            self.fail_release_once = false;
+            return Err(HostWebRtcError::InputFailure);
+        }
         Ok(())
     }
 }

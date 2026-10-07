@@ -135,17 +135,26 @@ final class RetryableRemoteDesktopController extends ChangeNotifier
     }
     _closed = true;
     final retry = _retryFuture;
-    if (retry != null) {
-      await retry;
-    }
     final current = _controller;
     current.removeListener(_handleControllerChanged);
-    await current.close();
-    _disposeController(current);
-    _state = RemoteDesktopState.idle;
-    _errorCode = null;
-    _reconnectProgress = null;
-    _notify();
+    try {
+      // Closing the child cancels a pending connection. Waiting for retry
+      // first would let that connection keep resources alive until it finishes.
+      await current.close();
+    } finally {
+      if (retry != null) {
+        try {
+          await retry;
+        } catch (_) {
+          // A failed connection must not prevent the child from being disposed.
+        }
+      }
+      _disposeController(current);
+      _state = RemoteDesktopState.idle;
+      _errorCode = null;
+      _reconnectProgress = null;
+      _notify();
+    }
   }
 
   void _handleControllerChanged() {
@@ -177,7 +186,7 @@ final class RetryableRemoteDesktopController extends ChangeNotifier
       return;
     }
     _disposed = true;
-    unawaited(close());
+    unawaited(close().catchError((_) {}));
     super.dispose();
   }
 }

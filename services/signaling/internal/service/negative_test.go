@@ -50,6 +50,17 @@ func TestNegativeFramesReturnUniformPublicErrors(t *testing.T) {
 			},
 			wantCode: roammandv1.ErrorCode_ERROR_CODE_INVALID_REQUEST,
 		},
+		{
+			name: "request ID near frame limit",
+			frame: &roammandv1.SignalingClientFrame{
+				ProtocolVersion: protocolVersion(),
+				RequestId:       strings.Repeat("r", validation.MaxSignalingServiceFrameBytes-32),
+				Payload: &roammandv1.SignalingClientFrame_Heartbeat{
+					Heartbeat: &roammandv1.Heartbeat{},
+				},
+			},
+			wantCode: roammandv1.ErrorCode_ERROR_CODE_INVALID_REQUEST,
+		},
 	}
 
 	for _, test := range tests {
@@ -57,9 +68,15 @@ func TestNegativeFramesReturnUniformPublicErrors(t *testing.T) {
 			testServer := newServiceTestServer(t, DefaultOptions())
 			client := testServer.dial(t)
 			writeClientFrame(t, client, test.frame)
-			if got := readServerFrame(t, client).GetError().GetCode(); got != test.wantCode {
+			response := readServerFrame(t, client)
+			if got := response.GetError().GetCode(); got != test.wantCode {
 				t.Fatalf("code = %v, want %v", got, test.wantCode)
 			}
+			if len(response.GetRequestId()) > validation.MaxRequestIDUTF8Bytes ||
+				len(response.GetError().GetRequestId()) > validation.MaxRequestIDUTF8Bytes {
+				t.Fatal("public error echoed an oversized request ID")
+			}
+			registerClient(t, client, testDeviceBytes(42), "register-after-invalid-frame")
 		})
 	}
 }

@@ -64,16 +64,16 @@ func TestPresenceTouchAndExpiry(t *testing.T) {
 	if !registry.Touch(id, 3, refreshedAt) {
 		t.Fatal("active route was not refreshed")
 	}
-	if expired := registry.ExpireBefore(refreshedAt); len(expired) != 0 {
+	if expired := registry.ExpiredBefore(refreshedAt); len(expired) != 0 {
 		t.Fatalf("expired %d routes at the exact last-seen boundary", len(expired))
 	}
 
-	expired := registry.ExpireBefore(refreshedAt.Add(time.Nanosecond))
+	expired := registry.ExpiredBefore(refreshedAt.Add(time.Nanosecond))
 	if len(expired) != 1 || expired[0].Token != 3 {
 		t.Fatalf("expired routes = %+v, want token 3", expired)
 	}
-	if registry.Len() != 0 {
-		t.Fatalf("registry length = %d, want 0", registry.Len())
+	if registry.Len() != 1 {
+		t.Fatalf("registry length = %d, want stale route reserved until cleanup", registry.Len())
 	}
 }
 
@@ -85,7 +85,13 @@ func TestPresenceReconnectAfterCleanup(t *testing.T) {
 	if !registry.Register(id, Route{Token: 1}, now) {
 		t.Fatal("first registration was rejected")
 	}
-	registry.ExpireBefore(now.Add(time.Nanosecond))
+	registry.ExpiredBefore(now.Add(time.Nanosecond))
+	if registry.Register(id, Route{Token: 2}, now.Add(time.Second)) {
+		t.Fatal("reconnect was accepted before expired connection cleanup")
+	}
+	if !registry.Remove(id, 1) {
+		t.Fatal("expired connection cleanup did not release its route")
+	}
 	if !registry.Register(id, Route{Token: 2}, now.Add(time.Second)) {
 		t.Fatal("reconnect was rejected after expiry cleanup")
 	}

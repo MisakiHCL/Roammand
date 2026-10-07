@@ -68,17 +68,18 @@ func (registry *PresenceRegistry) Remove(id DeviceID, token uint64) bool {
 	return true
 }
 
-func (registry *PresenceRegistry) ExpireBefore(cutoff time.Time) []Route {
-	registry.mu.Lock()
-	defer registry.mu.Unlock()
+// ExpiredBefore returns stale routes without releasing their device IDs. The
+// owning connection must finish cleanup before a replacement can register.
+func (registry *PresenceRegistry) ExpiredBefore(cutoff time.Time) []Route {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
 
 	expired := make([]Route, 0)
-	for id, route := range registry.routes {
+	for _, route := range registry.routes {
 		if !route.LastSeen.Before(cutoff) {
 			continue
 		}
 		expired = append(expired, route)
-		delete(registry.routes, id)
 	}
 	return expired
 }

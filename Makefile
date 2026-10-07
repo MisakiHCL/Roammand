@@ -60,7 +60,8 @@ app-check-steps:
 	cd $(FLUTTER_APP_DIR) && flutter analyze --no-pub && flutter test --no-pub
 
 app-prepare-host-macos: check-libwebrtc
-	@LK_CUSTOM_WEBRTC="$$(./scripts/fetch_libwebrtc.sh)"; \
+	@set -e; \
+	LK_CUSTOM_WEBRTC="$$(./scripts/fetch_libwebrtc.sh)"; \
 	LK_CUSTOM_WEBRTC="$$LK_CUSTOM_WEBRTC" cargo build $(CARGO_LOCK_FLAG) \
 		-p roammand-host-agent --features native-webrtc
 	./scripts/sign_macos_development.sh \
@@ -138,7 +139,8 @@ fetch-libwebrtc: check-libwebrtc
 	@./scripts/fetch_libwebrtc.sh
 
 test-native-webrtc: check-libwebrtc
-	@LK_CUSTOM_WEBRTC="$$(./scripts/fetch_libwebrtc.sh)"; \
+	@set -e; \
+	LK_CUSTOM_WEBRTC="$$(./scripts/fetch_libwebrtc.sh)"; \
 	LK_CUSTOM_WEBRTC="$$LK_CUSTOM_WEBRTC" cargo test $(CARGO_LOCK_FLAG) -p roammand-host-webrtc --features native-webrtc; \
 	LK_CUSTOM_WEBRTC="$$LK_CUSTOM_WEBRTC" cargo clippy $(CARGO_LOCK_FLAG) -p roammand-host-webrtc --features native-webrtc --all-targets -- -D warnings; \
 	LK_CUSTOM_WEBRTC="$$LK_CUSTOM_WEBRTC" cargo test $(CARGO_LOCK_FLAG) -p roammand-host-agent --features native-webrtc; \

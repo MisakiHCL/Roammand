@@ -221,7 +221,7 @@ func (server *Server) Sweep(now time.Time) {
 			nil,
 		)
 	}
-	expired := server.presence.ExpireBefore(now.Add(-server.options.PresenceTimeout))
+	expired := server.presence.ExpiredBefore(now.Add(-server.options.PresenceTimeout))
 	for _, route := range expired {
 		if route.Close != nil {
 			route.Close()
@@ -491,8 +491,10 @@ func (server *Server) sendFrame(
 
 func (server *Server) cleanupConnection(connection *clientConnection) {
 	if connection.registered.Load() {
-		server.presence.Remove(connection.deviceID, connection.token)
 		removed := server.rendezvous.RemoveForDevice(connection.deviceID)
+		// Keep the device ID reserved until its old rendezvous are gone. A new
+		// connection must not create state that this cleanup could remove.
+		server.presence.Remove(connection.deviceID, connection.token)
 		for _, rendezvous := range removed {
 			server.notifyRendezvousClosed(
 				rendezvous,

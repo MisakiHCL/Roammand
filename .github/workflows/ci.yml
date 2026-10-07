@@ -35,6 +35,8 @@ jobs:
         run: ./scripts/check_readme_contract.sh
       - name: Check Markdown links
         run: python3 ./scripts/check_markdown_links.py
+      - name: Check developer workflow failure handling
+        run: ./scripts/test_app_workflow_contract.sh
       - name: Check schema formatting
         run: buf format --diff --exit-code
       - name: Lint schema

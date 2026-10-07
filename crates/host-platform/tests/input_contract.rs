@@ -88,10 +88,49 @@ fn releases_a_press_that_the_os_reports_as_partially_injected() {
     );
 }
 
+#[test]
+fn retries_failed_releases_without_repeating_successful_releases() {
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let mut backend = RecordingBackend::new(Arc::clone(&events), (1920, 1080));
+    backend.fail_key_release_once = true;
+    backend.fail_button_release_once = true;
+    let mut sink = PlatformInputSink::new(backend).expect("display preflight must succeed");
+    sink.keyboard(KeyboardAction::Down, 0x04, 0)
+        .expect("first key must press");
+    sink.keyboard(KeyboardAction::Down, 0x05, 0)
+        .expect("second key must press");
+    sink.pointer_move(
+        5000,
+        5000,
+        PRESSED_LEFT_BUTTON_BIT | PRESSED_RIGHT_BUTTON_BIT,
+    )
+    .expect("buttons must press");
+    events.lock().expect("events lock").clear();
+
+    assert_eq!(sink.release_all(), Err(HostWebRtcError::InputFailure));
+    sink.release_all().expect("failed releases must retry");
+    sink.release_all()
+        .expect("successful cleanup must be idempotent");
+
+    assert_eq!(
+        *events.lock().expect("events lock"),
+        vec![
+            "key:4:release-failed",
+            "key:5:release",
+            "button:left:release-failed",
+            "button:right:release",
+            "key:4:release",
+            "button:left:release",
+        ]
+    );
+}
+
 struct RecordingBackend {
     events: Arc<Mutex<Vec<String>>>,
     display: (i32, i32),
     fail_injection: bool,
+    fail_key_release_once: bool,
+    fail_button_release_once: bool,
 }
 
 impl RecordingBackend {
@@ -100,6 +139,8 @@ impl RecordingBackend {
             events,
             display,
             fail_injection: false,
+            fail_key_release_once: false,
+            fail_button_release_once: false,
         }
     }
 
@@ -108,6 +149,8 @@ impl RecordingBackend {
             events,
             display,
             fail_injection: true,
+            fail_key_release_once: false,
+            fail_button_release_once: false,
         }
     }
 
@@ -130,6 +173,11 @@ impl PlatformInputBackend for RecordingBackend {
         usb_hid_usage: u32,
         direction: NativeDirection,
     ) -> Result<(), PlatformInputError> {
+        if direction == NativeDirection::Release && self.fail_key_release_once {
+            self.fail_key_release_once = false;
+            self.record(format!("key:{usb_hid_usage}:release-failed"))?;
+            return Err(PlatformInputError::InjectionFailed);
+        }
         self.record(format!("key:{usb_hid_usage}:{}", direction_name(direction)))
     }
 
@@ -138,6 +186,11 @@ impl PlatformInputBackend for RecordingBackend {
         button: NativeButton,
         direction: NativeDirection,
     ) -> Result<(), PlatformInputError> {
+        if direction == NativeDirection::Release && self.fail_button_release_once {
+            self.fail_button_release_once = false;
+            self.record(format!("button:{}:release-failed", button_name(button)))?;
+            return Err(PlatformInputError::InjectionFailed);
+        }
         self.record(format!(
             "button:{}:{}",
             button_name(button),

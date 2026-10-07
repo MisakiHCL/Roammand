@@ -203,4 +203,52 @@ if [[ -z "$failure_log" ]] || [[ ! -f "$failure_log" ]]; then
 fi
 rm -f "$failure_log"
 
+readonly NATIVE_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/roammand-native-workflow.XXXXXX")"
+trap 'rm -rf "$NATIVE_FIXTURE"' EXIT
+mkdir -p "$NATIVE_FIXTURE/scripts" "$NATIVE_FIXTURE/bin"
+cp Makefile "$NATIVE_FIXTURE/Makefile"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NATIVE_FIXTURE/scripts/check_libwebrtc_assets.sh"
+cat > "$NATIVE_FIXTURE/scripts/fetch_libwebrtc.sh" <<'SH'
+#!/usr/bin/env bash
+if [[ "$ROAMMAND_TEST_FAIL_STEP" -eq 0 ]]; then
+  exit 9
+fi
+printf '/fixture/webrtc\n'
+SH
+cat > "$NATIVE_FIXTURE/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ROAMMAND_TEST_CALL_LOG"
+call_count="$(wc -l < "$ROAMMAND_TEST_CALL_LOG")"
+if [[ "$call_count" -eq "$ROAMMAND_TEST_FAIL_STEP" ]]; then
+  exit 9
+fi
+SH
+chmod +x "$NATIVE_FIXTURE/scripts/"*.sh "$NATIVE_FIXTURE/bin/cargo"
+
+# A failure in asset fetching or any native test/lint must stop the gate;
+# successful later commands must never hide an earlier failure.
+for fail_step in 0 1 2 3 4 5; do
+  call_log="$NATIVE_FIXTURE/cargo-calls"
+  : > "$call_log"
+  set +e
+  PATH="$NATIVE_FIXTURE/bin:$PATH" \
+    ROAMMAND_TEST_FAIL_STEP="$fail_step" ROAMMAND_TEST_CALL_LOG="$call_log" \
+    make --no-print-directory -C "$NATIVE_FIXTURE" test-native-webrtc \
+    > "$NATIVE_FIXTURE/output" 2>&1
+  native_status="$?"
+  set -e
+  call_count="$(wc -l < "$call_log")"
+  if [[ "$fail_step" -lt 5 ]]; then
+    if [[ "$native_status" -eq 0 || "$call_count" -ne "$fail_step" ]]; then
+      printf 'native workflow did not stop at failed step %s\n' "$fail_step" >&2
+      cat "$NATIVE_FIXTURE/output" >&2
+      exit 1
+    fi
+  elif [[ "$native_status" -ne 0 || "$call_count" -ne 4 ]]; then
+    printf 'native workflow did not run all successful checks\n' >&2
+    cat "$NATIVE_FIXTURE/output" >&2
+    exit 1
+  fi
+done
+
 printf 'app workflow contract ok\n'
