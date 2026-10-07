@@ -58,6 +58,7 @@ pub struct HostPeerSession {
     last_pointer_sequence: u64,
     pressed_keys: BTreeSet<u32>,
     pressed_buttons: BTreeSet<i32>,
+    input_cleanup_pending: bool,
 }
 
 impl HostPeerSession {
@@ -88,6 +89,7 @@ impl HostPeerSession {
             last_pointer_sequence: 0,
             pressed_keys: BTreeSet::new(),
             pressed_buttons: BTreeSet::new(),
+            input_cleanup_pending: false,
         })
     }
 
@@ -306,9 +308,15 @@ impl HostPeerSession {
     /// # Errors
     ///
     /// Returns the first shutdown error after still attempting every cleanup.
+    /// Failed input releases are retried by a later close or drop without
+    /// reopening the peer or accepting new input.
     pub fn close(&mut self) -> Result<(), HostWebRtcError> {
         if self.state == HostSessionState::Closed {
-            return Ok(());
+            return if self.input_cleanup_pending {
+                self.release_all()
+            } else {
+                Ok(())
+            };
         }
         self.state = HostSessionState::Closing;
         let input_result = self.release_all();
@@ -412,6 +420,7 @@ impl HostPeerSession {
 
     fn release_all(&mut self) -> Result<(), HostWebRtcError> {
         let result = self.input.release_all();
+        self.input_cleanup_pending = result.is_err();
         self.pressed_keys.clear();
         self.pressed_buttons.clear();
         result

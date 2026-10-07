@@ -4,8 +4,10 @@ package service
 
 import (
 	"time"
+	"unicode/utf8"
 
 	roammandv1 "github.com/MisakiHCL/roammand/gen/go/roammand/v1"
+	validation "github.com/MisakiHCL/roammand/gen/go/validation"
 )
 
 type errorSpec struct {
@@ -52,6 +54,11 @@ func publicError(
 	requestID string,
 	retryAfter time.Duration,
 ) *roammandv1.SignalingServerFrame {
+	// Invalid frames can reach this path before their request ID is validated.
+	// Do not copy an unbounded or malformed ID into both response fields.
+	if len(requestID) > validation.MaxRequestIDUTF8Bytes || !utf8.ValidString(requestID) {
+		requestID = ""
+	}
 	spec, exists := publicErrorSpecs[code]
 	if !exists {
 		code = roammandv1.ErrorCode_ERROR_CODE_SERVER_UNAVAILABLE

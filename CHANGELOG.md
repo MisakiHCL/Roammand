@@ -10,6 +10,21 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Updated CodeQL initialization and analysis together to 4.38.2 and grouped
+  future Dependabot CodeQL updates to prevent incompatible scanner versions.
+- Kept expired signaling connections reserved until their pairing state is
+  cleaned up, preventing old cleanup from deleting a replacement connection's
+  rendezvous. Omitted invalid request IDs from error responses to keep frames
+  within protocol limits.
+- Retained failed keyboard and pointer releases for another cleanup attempt,
+  including when a remote session has already closed.
+- Cancelled pending remote-desktop retry connections before waiting for them
+  during shutdown, and disposed the child controller even if cleanup fails.
+- Made native WebRTC verification stop at the first failed asset, test, or
+  lint command so later successful checks cannot hide a failure.
+
 ## [1.0.4] - 2026-08-14
 
 ### Fixed

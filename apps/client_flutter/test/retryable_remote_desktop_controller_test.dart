@@ -94,14 +94,69 @@ void main() {
     child.fail();
     expect(controller.canRetry, isTrue);
   });
+
+  test('close cancels the retry connection before waiting for it', () async {
+    final connectGate = Completer<void>();
+    final children = <_FakeController>[];
+    final controller = RetryableRemoteDesktopController(
+      createController: () {
+        final child = _FakeController(
+          children.length + 1,
+          <String>[],
+          connectGate: children.isEmpty ? null : connectGate,
+        );
+        children.add(child);
+        return child;
+      },
+    );
+    await controller.connect(_target());
+    children.first.fail();
+    final retry = controller.retry();
+    await Future<void>.delayed(Duration.zero);
+    expect(children, hasLength(2));
+
+    final closing = controller.close();
+    await Future<void>.delayed(Duration.zero);
+    final closeCountDuringConnect = children.last.closeCount;
+    connectGate.complete();
+    await retry;
+    await closing;
+
+    expect(closeCountDuringConnect, 1);
+    expect(children.last.disposeCount, 1);
+    expect(controller.state, RemoteDesktopState.idle);
+    controller.dispose();
+  });
+
+  test('close disposes the child even when child cleanup fails', () async {
+    final failure = StateError('cleanup failed');
+    final child = _FakeController(1, <String>[], closeError: failure);
+    final controller = RetryableRemoteDesktopController(
+      createController: () => child,
+    );
+    await controller.connect(_target());
+
+    await expectLater(controller.close(), throwsA(same(failure)));
+
+    expect(child.disposeCount, 1);
+    expect(controller.state, RemoteDesktopState.idle);
+  });
 }
 
 final class _FakeController implements RemoteDesktopViewModel {
-  _FakeController(this.id, this.operations, {this.closeGate});
+  _FakeController(
+    this.id,
+    this.operations, {
+    this.closeGate,
+    this.connectGate,
+    this.closeError,
+  });
 
   final int id;
   final List<String> operations;
   final Completer<void>? closeGate;
+  final Completer<void>? connectGate;
+  final Object? closeError;
   final Object renderer = Object();
 
   @override
@@ -135,6 +190,7 @@ final class _FakeController implements RemoteDesktopViewModel {
     operations.add('connect:$id');
     state = RemoteDesktopState.connecting;
     _notify();
+    await connectGate?.future;
   }
 
   void fail() {
@@ -159,6 +215,8 @@ final class _FakeController implements RemoteDesktopViewModel {
     closeCount = 1;
     operations.add('close:$id');
     await closeGate?.future;
+    final error = closeError;
+    if (error != null) throw error;
     state = RemoteDesktopState.idle;
     _notify();
   }

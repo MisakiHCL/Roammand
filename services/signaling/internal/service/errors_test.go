@@ -9,6 +9,8 @@ import (
 	"time"
 
 	roammandv1 "github.com/MisakiHCL/roammand/gen/go/roammand/v1"
+	validation "github.com/MisakiHCL/roammand/gen/go/validation"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestPublicErrorMapping(t *testing.T) {
@@ -68,5 +70,34 @@ func TestUnknownPublicErrorFallsBackToServerUnavailable(t *testing.T) {
 	frame := publicError(roammandv1.ErrorCode_ERROR_CODE_UNSPECIFIED, "request-3", 0)
 	if got := frame.GetError().GetCode(); got != roammandv1.ErrorCode_ERROR_CODE_SERVER_UNAVAILABLE {
 		t.Fatalf("code = %v", got)
+	}
+}
+
+func TestPublicErrorBoundsUnvalidatedRequestID(t *testing.T) {
+	tests := []struct {
+		name      string
+		requestID string
+		expected  string
+	}{
+		{"maximum bytes", strings.Repeat("a", validation.MaxRequestIDUTF8Bytes), strings.Repeat("a", validation.MaxRequestIDUTF8Bytes)},
+		{"oversized", strings.Repeat("a", validation.MaxRequestIDUTF8Bytes+1), ""},
+		{"maximum frame", strings.Repeat("a", validation.MaxSignalingServiceFrameBytes-32), ""},
+		{"oversized UTF-8", strings.Repeat("界", validation.MaxRequestIDUTF8Bytes/3+1), ""},
+		{"invalid UTF-8", string([]byte{0xff}), ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			frame := publicError(roammandv1.ErrorCode_ERROR_CODE_INVALID_REQUEST, test.requestID, 0)
+			if frame.GetRequestId() != test.expected || frame.GetError().GetRequestId() != test.expected {
+				t.Fatalf("request ID lengths = (%d, %d), want %d", len(frame.GetRequestId()), len(frame.GetError().GetRequestId()), len(test.expected))
+			}
+			encoded, err := proto.Marshal(frame)
+			if err != nil {
+				t.Fatalf("public error does not marshal: %v", err)
+			}
+			if len(encoded) > validation.MaxSignalingServiceFrameBytes {
+				t.Fatalf("public error length = %d, exceeds frame limit", len(encoded))
+			}
+		})
 	}
 }

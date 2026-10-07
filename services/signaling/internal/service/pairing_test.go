@@ -8,6 +8,7 @@ import (
 	"time"
 
 	roammandv1 "github.com/MisakiHCL/roammand/gen/go/roammand/v1"
+	"github.com/MisakiHCL/roammand/services/signaling/internal/state"
 	"github.com/coder/websocket"
 )
 
@@ -343,6 +344,63 @@ func TestPairingExpiryAndDisconnectNotifyMembers(t *testing.T) {
 			t.Fatalf("disconnect notification = %+v", closed)
 		}
 	})
+}
+
+func TestPresenceExpiryReservesDeviceUntilRendezvousCleanup(t *testing.T) {
+	clock := newTestClock(time.Unix(100, 0))
+	options := DefaultOptions()
+	options.Now = clock.Now
+	options.SweepInterval = time.Hour
+	testServer := newServiceTestServer(t, options)
+	host := testServer.dial(t)
+	replacement := testServer.dial(t)
+	hostBytes := testDeviceBytes(38)
+	hostID, valid := state.DeviceIDFromBytes(hostBytes)
+	if !valid {
+		t.Fatal("invalid test device ID")
+	}
+	registerClient(t, host, hostBytes, "register-host")
+	createRendezvous(t, host, testRendezvousBytes(38), roammandv1.PairingRendezvousKind_PAIRING_RENDEZVOUS_KIND_QR, "")
+	if created := readServerFrame(t, host).GetRendezvousCreated(); created == nil {
+		t.Fatal("old connection rendezvous creation response missing")
+	}
+
+	// Hold the expired connection open so the test controls the gap between
+	// presence expiry and the old connection's cleanup.
+	route, online := testServer.service.presence.Lookup(hostID)
+	if !online || route.Close == nil {
+		t.Fatal("registered host route missing")
+	}
+	closeExpiredConnection := route.Close
+	route.Close = func() {}
+	if !testServer.service.presence.Remove(hostID, route.Token) ||
+		!testServer.service.presence.Register(hostID, route, clock.Now()) {
+		t.Fatal("could not hold the expired route open")
+	}
+
+	clock.Advance(options.PresenceTimeout + time.Nanosecond)
+	testServer.service.Sweep(clock.Now())
+	writeRegister(t, replacement, hostBytes, "register-before-cleanup")
+	if got := readServerFrame(t, replacement).GetError().GetCode(); got != roammandv1.ErrorCode_ERROR_CODE_DEVICE_BUSY {
+		t.Fatalf("registration before cleanup = %v, want device busy", got)
+	}
+	if got := testServer.service.RendezvousCount(); got != 1 {
+		t.Fatalf("rendezvous before connection cleanup = %d, want 1", got)
+	}
+
+	closeExpiredConnection()
+	waitFor(t, time.Second, func() bool { return testServer.service.PresenceCount() == 0 })
+	if got := testServer.service.RendezvousCount(); got != 0 {
+		t.Fatalf("rendezvous after connection cleanup = %d, want 0", got)
+	}
+	registerClient(t, replacement, hostBytes, "register-after-cleanup")
+	createRendezvous(t, replacement, testRendezvousBytes(39), roammandv1.PairingRendezvousKind_PAIRING_RENDEZVOUS_KIND_QR, "")
+	if created := readServerFrame(t, replacement).GetRendezvousCreated(); created == nil {
+		t.Fatal("replacement connection rendezvous creation response missing")
+	}
+	if got := testServer.service.RendezvousCount(); got != 1 {
+		t.Fatalf("replacement rendezvous = %d, want 1", got)
+	}
 }
 
 func createAndJoinQR(t *testing.T, host *websocket.Conn, controller *websocket.Conn, rendezvousID []byte) {

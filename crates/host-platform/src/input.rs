@@ -289,24 +289,26 @@ impl<B: PlatformInputBackend> RemoteInputSink for PlatformInputSink<B> {
 
     fn release_all(&mut self) -> Result<(), HostWebRtcError> {
         let mut first_error = None;
-        for usage in std::mem::take(&mut self.pressed_keys) {
-            if self
-                .backend
-                .keyboard(usage, NativeDirection::Release)
+        // A failed release can leave the OS key/button pressed. Keep that
+        // state so a later cleanup attempt can retry just the failed items.
+        let backend = &mut self.backend;
+        self.pressed_keys.retain(|usage| {
+            if backend.keyboard(*usage, NativeDirection::Release).is_err() {
+                first_error.get_or_insert(HostWebRtcError::InputFailure);
+                return true;
+            }
+            false
+        });
+        self.pressed_buttons.retain(|button| {
+            if backend
+                .pointer_button(*button, NativeDirection::Release)
                 .is_err()
             {
                 first_error.get_or_insert(HostWebRtcError::InputFailure);
+                return true;
             }
-        }
-        for button in std::mem::take(&mut self.pressed_buttons) {
-            if self
-                .backend
-                .pointer_button(button, NativeDirection::Release)
-                .is_err()
-            {
-                first_error.get_or_insert(HostWebRtcError::InputFailure);
-            }
-        }
+            false
+        });
         first_error.map_or(Ok(()), Err)
     }
 }
