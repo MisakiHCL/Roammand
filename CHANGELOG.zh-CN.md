@@ -10,6 +10,8 @@
 
 ## [未发布]
 
+## [1.1.0] - 2026-10-25
+
 ### 变更
 
 - 减少屏幕采集中的内存复制；已有画面等待处理时，跳过后续画面的像素转换。
@@ -18,6 +20,8 @@
 - 批量处理 Host 输入，取消空闲配对轮询，并为信令重连加入有上限的指数退避
   和随机抖动。
 - 使用带删除索引的到期最小堆，替代每个配对请求触发的缓存全表扫描。
+- 将 rustls 从 0.23.42 升级到 0.23.45，并将 rustls-webpki 从 0.103.13 升级到
+  0.103.15。
 
 ### 修复
 
@@ -30,7 +34,7 @@
   和重试等待阶段。
 - 手势触发的键盘输入取消不再被视为通道故障，避免正常释放输入导致远程会话
   意外断开。
-- 将 CodeQL 初始化和分析步骤一同升级到 4.38.2，并对后续 Dependabot CodeQL
+- 将 CodeQL 初始化和分析步骤一同升级到 4.38.3，并对后续 Dependabot CodeQL
   更新分组，避免扫描器版本不一致。
 - 保留过期信令连接的设备占位，直到旧配对状态清理完成，避免旧连接清理误删
   重连后的 rendezvous；错误响应不再回显无效请求 ID，确保帧大小符合协议限制。
@@ -153,7 +157,8 @@ ID 签名、Apple 公证并附加公证票据的安装包。
 
 该版本包含已知问题，仅保留用于版本历史。请勿安装，应使用 1.0.1 或更高版本。
 
-[未发布]: https://github.com/MisakiHCL/roammand/compare/v1.0.4...HEAD
+[未发布]: https://github.com/MisakiHCL/roammand/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/MisakiHCL/roammand/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MisakiHCL/roammand/compare/v1.0.1...v1.0.2

@@ -10,6 +10,8 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-25
+
 ### Changed
 
 - Reduced screen-capture memory copying and skipped pixel conversion when a
@@ -19,6 +21,8 @@ and released versions follow semantic versioning.
 - Batched Host input processing, removed idle pairing polling, and added bounded
   exponential signaling reconnect delays with jitter.
 - Replaced per-request pairing-cache scans with an indexed expiration heap.
+- Updated rustls from 0.23.42 to 0.23.45 and rustls-webpki from 0.103.13 to
+  0.103.15.
 
 ### Fixed
 
@@ -33,7 +37,7 @@ and released versions follow semantic versioning.
   reconnecting, including during connection attempts and retry delays.
 - Prevented gesture-triggered keyboard cancellation from being treated as a
   channel failure that disconnects an otherwise healthy remote session.
-- Updated CodeQL initialization and analysis together to 4.38.2 and grouped
+- Updated CodeQL initialization and analysis together to 4.38.3 and grouped
   future Dependabot CodeQL updates to prevent incompatible scanner versions.
 - Kept expired signaling connections reserved until their pairing state is
   cleaned up, preventing old cleanup from deleting a replacement connection's
@@ -175,7 +179,8 @@ Apple-notarized, stapled macOS package for macOS 14.4 or later.
 This release contains known issues and is retained only for version history. Do
 not install it; use 1.0.1 or a later release.
 
-[Unreleased]: https://github.com/MisakiHCL/roammand/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/MisakiHCL/roammand/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/MisakiHCL/roammand/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/MisakiHCL/roammand/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/MisakiHCL/roammand/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/MisakiHCL/roammand/compare/v1.0.1...v1.0.2
