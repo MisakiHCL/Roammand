@@ -426,10 +426,12 @@ readonly UNIVERSAL_BINARIES=(
 for path in "${UNIVERSAL_BINARIES[@]}"; do
   binary="$PACKAGE_DIR/$path"
   if file -b "$binary" | rg -q '^Mach-O'; then
-    lipo "$binary" -verify_arch arm64 x86_64 >/dev/null || {
-      printf 'macOS package binary is not Universal\n' >&2
-      exit 1
-    }
+    for architecture in arm64 x86_64; do
+      lipo "$binary" -verify_arch "$architecture" >/dev/null || {
+        printf 'macOS package binary is not Universal\n' >&2
+        exit 1
+      }
+    done
   fi
 done
 readonly SESSION_AGENT="$PACKAGE_DIR/Applications/Roammand.app/Contents/Library/LoginItems/RoammandSessionAgent.app/Contents/MacOS/roammand-session-agent"

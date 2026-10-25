@@ -29,7 +29,9 @@ notarized by Apple.
 
 ### Fixed
 
-- Verified Universal macOS Agent architectures individually so `lipo` versions
+- Aligned CocoaPods build targets with the app's existing macOS 14.4 minimum
+  for newer Xcode releases.
+- Verified Universal macOS binary architectures individually so `lipo` versions
   that accept only one architecture per check do not reject valid builds.
 - Kept signaling retry delays short while retaining an active session, even
   after earlier connection failures, so a brief outage does not miss all

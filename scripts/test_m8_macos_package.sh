@@ -20,6 +20,7 @@ rg -q '<string>LoginWindow</string>' packaging/macos/dev.roammand.SessionAgent.p
 rg -q 'AssociatedBundleIdentifiers' scripts/package_m8_macos.sh
 test ! -e packaging/macos/dev.roammand.HostAgent.plist
 test "$(rg -c 'MACOSX_DEPLOYMENT_TARGET = 14\.4;' apps/client_flutter/macos/Runner.xcodeproj/project.pbxproj)" -eq 3
+rg -q "^platform :osx, '14\.4'$" apps/client_flutter/macos/Podfile
 test "$(rg -c 'ENABLE_HARDENED_RUNTIME = YES;' apps/client_flutter/macos/Runner.xcodeproj/project.pbxproj)" -eq 1
 rg -q 'build_macos_universal_agents\.sh' scripts/package_m8_macos.sh
 rg -q -- '--target "\$target"' scripts/build_macos_universal_agents.sh
@@ -118,7 +119,6 @@ if rg -q '(private[_ -]?key|seed|signaling|turn[_ -]?password|/Users/|--shell|in
 fi
 
 mkdir -p "$TEMP_DIR/Roammand.app/Contents/MacOS"
-printf 'app\n' >"$TEMP_DIR/Roammand.app/Contents/MacOS/roammand"
 printf '%s\n' \
   '<?xml version="1.0" encoding="UTF-8"?>' \
   '<plist version="1.0"><dict>' \
@@ -126,7 +126,16 @@ printf '%s\n' \
   '<key>CFBundleShortVersionString</key><string>1.0.2</string>' \
   '<key>CFBundleVersion</key><string>5</string>' \
   '</dict></plist>' >"$TEMP_DIR/Roammand.app/Contents/Info.plist"
-printf 'host\n' >"$TEMP_DIR/roammand-host-agent"
+# The app and Host fixtures are real Mach-O files so the package check exercises
+# system lipo. Bridge and Session fixtures remain executable contract responders.
+printf 'int roammand_package_fixture(void) { return 0; }\n' >"$TEMP_DIR/fixture.c"
+for arch in arm64 x86_64; do
+  /usr/bin/clang -arch "$arch" -mmacosx-version-min=14.4 -c \
+    "$TEMP_DIR/fixture.c" -o "$TEMP_DIR/$arch.o"
+done
+/usr/bin/lipo -create "$TEMP_DIR/arm64.o" "$TEMP_DIR/x86_64.o" \
+  -output "$TEMP_DIR/roammand-host-agent"
+cp "$TEMP_DIR/roammand-host-agent" "$TEMP_DIR/Roammand.app/Contents/MacOS/roammand"
 printf '#!/bin/sh\nexit 0\n' >"$TEMP_DIR/roammand-privileged-bridge"
 printf '#!/bin/sh\nexit 0\n' >"$TEMP_DIR/roammand-session-agent"
 printf 'arm64 libwebrtc license\n' >"$TEMP_DIR/libwebrtc-arm64-LICENSE.md"
@@ -228,6 +237,22 @@ for path in "${BACKGROUND_JOB_PLISTS[@]}"; do
   fi
 done
 ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package"
+for path in \
+  "Applications/Roammand.app/Contents/MacOS/roammand" \
+  "Library/PrivilegedHelperTools/roammand-host-agent"; do
+  for arch in arm64 x86_64; do
+    cp "$TEMP_DIR/$arch.o" "$TEMP_DIR/package/$path"
+    ./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
+    if ./scripts/check_m8_macos_package.sh "$TEMP_DIR/package" \
+      >"$TEMP_DIR/architecture-check.log" 2>&1; then
+      printf 'macOS package checker accepted %s containing only %s\n' "$path" "$arch" >&2
+      exit 1
+    fi
+    rg -q 'macOS package binary is not Universal' "$TEMP_DIR/architecture-check.log"
+  done
+  cp "$TEMP_DIR/roammand-host-agent" "$TEMP_DIR/package/$path"
+done
+./scripts/write_macos_package_manifest.sh "$TEMP_DIR/package" >/dev/null
 readonly SESSION_JOB_PLIST="$TEMP_DIR/package/Library/LaunchAgents/dev.roammand.SessionAgent.plist"
 cp "$SESSION_JOB_PLIST" "$TEMP_DIR/valid-session-agent.plist"
 plutil -remove AssociatedBundleIdentifiers "$SESSION_JOB_PLIST"
