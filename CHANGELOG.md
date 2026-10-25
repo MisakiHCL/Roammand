@@ -12,6 +12,9 @@ and released versions follow semantic versioning.
 
 ## [1.1.0] - 2026-10-25
 
+The macOS installer published with 1.1.0 is Developer ID-signed and has not been
+notarized by Apple.
+
 ### Changed
 
 - Reduced screen-capture memory copying and skipped pixel conversion when a

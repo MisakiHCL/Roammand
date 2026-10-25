@@ -22,10 +22,12 @@ Roammand 把手机、平板或另一台电脑变成可信控制界面，让你�
 
 | 平台 | 角色 | 获取方式 |
 | --- | --- | --- |
-| macOS 14.4 或更高版本 | Host 与 Controller | [从 GitHub Releases 下载经过签名和公证的 `.pkg`](https://github.com/MisakiHCL/roammand/releases/latest/download/Roammand.pkg) |
+| macOS 14.4 或更高版本（Universal） | Host 与 Controller | [从 GitHub Releases 下载经过 Developer ID 签名的 `.pkg`（1.1.0，未经公证）](https://github.com/MisakiHCL/roammand/releases/latest/download/Roammand.pkg) |
 | Windows 10 / 11 | Host 与 Controller | 提供源码构建与打包脚本；已安装 Host 的验收基线当前为 Windows 11；暂无公开安装包 |
 | iOS / iPadOS 15 或更高版本 | Controller | 源码构建或维护者邀请测试；暂无公开 App Store 下载 |
 | Android 7.0 或更高版本（API 24） | Controller | 源码构建；暂无公开安装包 |
+
+1.1.0 未经 Apple 公证，Gatekeeper 可能会阻止打开。
 
 macOS 历史安装包及资产摘要见
 [GitHub Releases](https://github.com/MisakiHCL/roammand/releases)。在公开移动版

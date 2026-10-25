@@ -23,10 +23,12 @@ release availability are intentionally shown separately.
 
 | Platform | Role | Availability |
 | --- | --- | --- |
-| macOS 14.4 or later | Host and Controller | [Signed and notarized `.pkg` from GitHub Releases](https://github.com/MisakiHCL/roammand/releases/latest/download/Roammand.pkg) |
+| macOS 14.4 or later (Universal) | Host and Controller | [Developer ID-signed `.pkg` from GitHub Releases (1.1.0, not notarized)](https://github.com/MisakiHCL/roammand/releases/latest/download/Roammand.pkg) |
 | Windows 10 / 11 | Host and Controller | Source build and packaging scripts; installed-Host acceptance is currently defined for Windows 11; no public binary |
 | iOS / iPadOS 15 or later | Controller | Source build or maintainer-invited testing; no public App Store download |
 | Android 7.0 or later (API 24) | Controller | Source build; no public binary |
+
+Version 1.1.0 has not been notarized by Apple; Gatekeeper may block opening it.
 
 See [GitHub Releases](https://github.com/MisakiHCL/roammand/releases) for
 previous macOS packages and asset digests. Source-built and invited mobile
