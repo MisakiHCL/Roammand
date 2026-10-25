@@ -254,7 +254,7 @@
   "desktopSetupStepCreateQr": "Open This computer and choose Show mobile QR code.",
   "desktopSetupStepScanApprove": "Scan the code with Roammand on your iPhone or iPad, confirm the device details, then approve it on this Mac.",
   "aboutMacAppTitle": "Roammand for Mac",
-  "aboutMacAppBody": "Install the signed and notarized Mac app on macOS 14.4 or later. The Mac app provides the screen and accepts remote input only from devices you approve.",
+  "aboutMacAppBody": "Install the Developer ID-signed Mac app on macOS 14.4 or later. Version 1.1.0 has not been notarized by Apple; Gatekeeper may block opening it. The Mac app provides the screen and accepts remote input only from devices you approve.",
   "aboutMacDownloadNote": "Open the download page on your Mac, or share the link from this device.",
   "aboutIosAppTitle": "Roammand for iPhone and iPad",
   "aboutIosAppBody": "The mobile controller is available from source. Build it for the iPhone or iPad you want to use, then pair it with this Mac by scanning a QR code.",

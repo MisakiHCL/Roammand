@@ -416,7 +416,11 @@ macOS 卸载器会完整移除 Roammand 的设备身份、Controller 授权、�
 ./scripts/check_apple_release_preflight.sh
 ```
 
-iOS 使用 App Store/TestFlight Archive 发行。完整 macOS Host 使用 Developer ID 签名、Hardened Runtime、签名安装器、公证和 stapling，通过官网下载发行。其需要特权组件且不使用沙盒的架构不适用于 Mac App Store；如需商店发行，必须采用独立的沙盒 Controller-only 设计。
+iOS 使用 App Store/TestFlight Archive 发行。完整 macOS Host 使用 Developer ID
+签名、Hardened Runtime 和签名安装器直接发行。Apple 公证与 stapling 是由
+`make release-macos` 提供的可选步骤；1.1.0 发行版未经 Apple 公证。
+其需要特权组件且不使用沙盒的架构不适用于 Mac App Store；如需商店发行，必须
+采用独立的沙盒 Controller-only 设计。
 
 ## 验证改动
 

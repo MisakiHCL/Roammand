@@ -1547,7 +1547,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutMacAppBody.
   ///
   /// In en, this message translates to:
-  /// **'Install the signed and notarized Mac app on macOS 14.4 or later. The Mac app provides the screen and accepts remote input only from devices you approve.'**
+  /// **'Install the Developer ID-signed Mac app on macOS 14.4 or later. Version 1.1.0 has not been notarized by Apple; Gatekeeper may block opening it. The Mac app provides the screen and accepts remote input only from devices you approve.'**
   String get aboutMacAppBody;
 
   /// No description provided for @aboutMacDownloadNote.

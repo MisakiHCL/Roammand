@@ -9,6 +9,8 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 
 cd "$ROOT_DIR"
 
+./scripts/test_macos_universal_agents.sh
+
 plutil -lint packaging/macos/*.plist packaging/macos/session-agent/Info.plist >/dev/null
 rg -q '<string>com\.hclgame\.roammand\.PrivilegedBridge</string>' \
   packaging/macos/com.hclgame.roammand.PrivilegedBridge.plist

@@ -253,7 +253,7 @@
   "desktopSetupStepCreateQr": "打开“此电脑”，选择“显示手机二维码”。",
   "desktopSetupStepScanApprove": "用 iPhone 或 iPad 上的 Roammand 扫码，确认设备信息，然后在这台 Mac 上批准该设备。",
   "aboutMacAppTitle": "Roammand Mac 版",
-  "aboutMacAppBody": "请在 macOS 14.4 或更高版本上安装经过签名和公证的 Mac App。Mac 端负责提供画面，并且只接受你批准过的设备进行远程控制。",
+  "aboutMacAppBody": "请在 macOS 14.4 或更高版本上安装经过 Developer ID 签名的 Mac App。1.1.0 未经 Apple 公证，Gatekeeper 可能会阻止打开。Mac 端负责提供画面，并且只接受你批准过的设备进行远程控制。",
   "aboutMacDownloadNote": "请在 Mac 上打开下载页面，或从这台设备将链接分享给 Mac。",
   "aboutIosAppTitle": "Roammand iPhone 与 iPad 版",
   "aboutIosAppBody": "移动控制端目前以源码形式提供。请为要用作控制端的 iPhone 或 iPad 构建 App，再扫描二维码与这台 Mac 配对。",

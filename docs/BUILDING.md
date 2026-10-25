@@ -481,7 +481,12 @@ printing the Team ID, bundle ID, or signing identity:
 ./scripts/check_apple_release_preflight.sh
 ```
 
-iOS distribution uses App Store/TestFlight archives. The complete macOS Host uses Developer ID signing, Hardened Runtime, a signed installer, notarization, and stapling for direct distribution. Its privileged non-sandboxed architecture is not a Mac App Store target; a store-distributed macOS app requires a separate sandboxed Controller-only design.
+iOS distribution uses App Store/TestFlight archives. The complete macOS Host uses
+Developer ID signing, Hardened Runtime, and a signed installer for direct
+distribution. Apple notarization and stapling are optional steps provided by
+`make release-macos`; version 1.1.0 is published without Apple notarization.
+Its privileged non-sandboxed architecture is not a Mac App Store target; a
+store-distributed macOS app requires a separate sandboxed Controller-only design.
 
 ## Verify changes
 

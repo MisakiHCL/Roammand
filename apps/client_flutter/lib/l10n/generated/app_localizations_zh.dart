@@ -788,7 +788,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get aboutMacAppBody =>
-      '请在 macOS 14.4 或更高版本上安装经过签名和公证的 Mac App。Mac 端负责提供画面，并且只接受你批准过的设备进行远程控制。';
+      '请在 macOS 14.4 或更高版本上安装经过 Developer ID 签名的 Mac App。1.1.0 未经 Apple 公证，Gatekeeper 可能会阻止打开。Mac 端负责提供画面，并且只接受你批准过的设备进行远程控制。';
 
   @override
   String get aboutMacDownloadNote => '请在 Mac 上打开下载页面，或从这台设备将链接分享给 Mac。';

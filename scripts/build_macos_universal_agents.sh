@@ -60,7 +60,8 @@ for binary in \
   "$OUTPUT_DIR/roammand-host-agent" \
   "$OUTPUT_DIR/roammand-privileged-bridge" \
   "$OUTPUT_DIR/roammand-session-agent"; do
-  lipo "$binary" -verify_arch arm64 x86_64
+  lipo "$binary" -verify_arch arm64
+  lipo "$binary" -verify_arch x86_64
 done
 
 printf 'Universal macOS Agents built\n'

@@ -21,7 +21,8 @@
 ## 安装并授权 Mac
 
 1. 从 [GitHub Releases](https://github.com/MisakiHCL/roammand/releases/latest)
-   下载经过签名和公证的 `Roammand.pkg`。
+   下载经过 Developer ID 签名的 `Roammand.pkg`。
+   1.1.0 未经 Apple 公证，Gatekeeper 可能会阻止打开。
 2. 打开安装包，并批准管理员提示，以安装 App 和所需的 Host 组件。
 3. 启动 Roammand，打开“**此电脑**”。
 4. 分别点击两项“**去设置**”，在系统设置中授予“屏幕录制”和“辅助功能”权限。

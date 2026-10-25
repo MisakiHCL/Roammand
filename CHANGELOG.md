@@ -29,6 +29,8 @@ notarized by Apple.
 
 ### Fixed
 
+- Verified Universal macOS Agent architectures individually so `lipo` versions
+  that accept only one architecture per check do not reject valid builds.
 - Kept signaling retry delays short while retaining an active session, even
   after earlier connection failures, so a brief outage does not miss all
   Controller recovery offers.

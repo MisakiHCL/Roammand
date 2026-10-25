@@ -21,8 +21,9 @@
 
 ## Install and authorize the Mac
 
-1. Download the signed and notarized `Roammand.pkg` from
+1. Download the Developer ID-signed `Roammand.pkg` from
    [GitHub Releases](https://github.com/MisakiHCL/roammand/releases/latest).
+   Version 1.1.0 has not been notarized by Apple; Gatekeeper may block opening it.
 2. Open the package and approve the administrator prompt to install the app and
    its required Host components.
 3. Start Roammand and open **This computer**.
