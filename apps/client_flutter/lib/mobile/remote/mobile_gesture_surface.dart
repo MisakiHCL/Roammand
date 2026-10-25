@@ -13,13 +13,13 @@ const _leftButtonBits = 1;
 typedef MobileInputFailureCallback = void Function(Object error);
 
 final class MobileGestureSurfaceController {
-  void Function()? _cancel;
+  void Function(bool releaseInput)? _cancel;
 
-  void cancel() => _cancel?.call();
+  void cancel({bool releaseInput = true}) => _cancel?.call(releaseInput);
 
-  void _attach(void Function() cancel) => _cancel = cancel;
+  void _attach(void Function(bool releaseInput) cancel) => _cancel = cancel;
 
-  void _detach(void Function() cancel) {
+  void _detach(void Function(bool releaseInput) cancel) {
     if (_cancel == cancel) {
       _cancel = null;
     }
@@ -32,6 +32,7 @@ final class MobileGestureSurface extends StatefulWidget {
     required this.videoAspectRatio,
     this.sender,
     this.controller,
+    this.releaseInput,
     this.initialScale = mobileViewportDefaultScale,
     this.initialObscuredInsets,
     this.scheduler = const TimerMobileGestureScheduler(),
@@ -43,6 +44,7 @@ final class MobileGestureSurface extends StatefulWidget {
   final double videoAspectRatio;
   final RemoteInputSender? sender;
   final MobileGestureSurfaceController? controller;
+  final Future<void> Function()? releaseInput;
   final double initialScale;
   final EdgeInsets? initialObscuredInsets;
   final MobileGestureScheduler scheduler;
@@ -60,6 +62,7 @@ final class _MobileGestureSurfaceState extends State<MobileGestureSurface> {
   double _zoomStartScale = mobileViewportMinimumScale;
   bool _dragActive = false;
   bool _viewportAdjusted = false;
+  bool _suppressInputRelease = false;
 
   @override
   void initState() {
@@ -289,14 +292,22 @@ final class _MobileGestureSurfaceState extends State<MobileGestureSurface> {
     );
   }
 
-  void _cancel() => _gestureMachine.cancel();
+  void _cancel(bool releaseInput) {
+    _suppressInputRelease = !releaseInput;
+    try {
+      _gestureMachine.cancel();
+    } finally {
+      _suppressInputRelease = false;
+    }
+  }
 
   void _releaseRemoteInput() {
     _dragActive = false;
     _lastDragPosition = null;
-    final sender = widget.sender;
-    if (sender != null) {
-      _guard(sender.releaseAll);
+    if (_suppressInputRelease) return;
+    final release = widget.releaseInput ?? widget.sender?.releaseAll;
+    if (release != null) {
+      _guard(release);
     }
   }
 

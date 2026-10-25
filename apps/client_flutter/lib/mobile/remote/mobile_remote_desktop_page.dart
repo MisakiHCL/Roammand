@@ -336,6 +336,7 @@ final class _MobileRemoteDesktopPageState extends State<MobileRemoteDesktopPage>
         videoAspectRatio: aspectRatio,
         sender: _connectedSender,
         controller: _gestureController,
+        releaseInput: _keyboardController?.releaseAll,
         onInputFailure: _handleInputFailure,
       );
 
@@ -650,11 +651,14 @@ final class _MobileRemoteDesktopPageState extends State<MobileRemoteDesktopPage>
   }
 
   void _releaseInput() {
-    _gestureController.cancel();
+    // This owner releases below even when the gesture machine has already
+    // cancelled; suppress its callback to avoid releasing the same work twice.
+    _gestureController.cancel(releaseInput: false);
     unawaited(
-      (_keyboardController?.releaseAll() ?? Future<void>.value()).catchError(
-        _handleInputFailure,
-      ),
+      (_keyboardController?.releaseAll() ??
+              _connectedSender?.releaseAll() ??
+              Future<void>.value())
+          .catchError(_handleInputFailure),
     );
   }
 

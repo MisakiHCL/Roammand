@@ -6,12 +6,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:roammand/diagnostics/diagnostics_collector.dart';
 import 'package:roammand/diagnostics/diagnostics_model.dart';
 import 'package:roammand/desktop/remote/input_sender.dart';
 import 'package:roammand/desktop/remote/remote_desktop_controller.dart';
 import 'package:roammand/l10n/generated/app_localizations.dart';
 import 'package:roammand/mobile/remote/mobile_input_tray.dart';
+import 'package:roammand/mobile/remote/mobile_keyboard_controller.dart';
 import 'package:roammand/mobile/remote/mobile_remote_desktop_page.dart';
 import 'package:roammand/mobile/widgets/mobile_page_header.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
@@ -534,6 +536,218 @@ void main() {
     expect(keyboard.last.modifierBits, 0x01);
   });
 
+  for (final threeFingers in <bool>[false, true]) {
+    testWidgets(
+      '${threeFingers ? 'three-finger cancellation' : 'pointer cancellation'} releases idle modifiers and repaints the tray',
+      (tester) async {
+        final fixture = _PageFixture();
+        await tester.pumpWidget(_app(fixture.page()));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('mobile-keyboard-toggle')));
+        await tester.pump();
+        final keyboard = tester
+            .widget<MobileInputTray>(find.byType(MobileInputTray))
+            .controller!;
+        final control = find.byKey(const Key('mobile-modifier-control'));
+        await keyboard.setModifier(MobileModifierKey.control, true);
+        await tester.pump();
+        expect(tester.widget<FilterChip>(control).selected, isTrue);
+
+        final surface = find.byKey(const Key('mobile-remote-gesture-surface'));
+        final center = tester.getCenter(surface);
+        final first = await tester.startGesture(center, pointer: 1);
+        if (threeFingers) {
+          final second = await tester.startGesture(
+            center + const Offset(20, 0),
+            pointer: 2,
+          );
+          final third = await tester.startGesture(
+            center - const Offset(20, 0),
+            pointer: 3,
+          );
+          await first.up();
+          await second.up();
+          await third.up();
+        } else {
+          await first.cancel();
+        }
+        await tester.pump();
+
+        expect(
+          fixture.reliable.decoded.where((event) => event.hasReleaseAllInput()),
+          hasLength(1),
+        );
+        expect(keyboard.activeModifiers, isEmpty);
+        expect(tester.widget<FilterChip>(control).selected, isFalse);
+        await tester.tap(find.byKey(const Key('mobile-special-tab')));
+        await tester.pump();
+        final tabs = fixture.reliable.decoded
+            .where(
+              (event) =>
+                  event.hasKeyboard() && event.keyboard.usbHidUsage == 0x2b,
+            )
+            .map((event) => event.keyboard);
+        expect(tabs, hasLength(2));
+        expect(tabs.map((event) => event.modifierBits), everyElement(0));
+
+        await tester.tap(control);
+        await tester.pump();
+        final controlDowns = fixture.reliable.decoded.where(
+          (event) =>
+              event.hasKeyboard() &&
+              event.keyboard.usbHidUsage == 0xe0 &&
+              event.keyboard.action == KeyboardAction.KEYBOARD_ACTION_DOWN,
+        );
+        expect(controlDowns, hasLength(2));
+        expect(tester.widget<FilterChip>(control).selected, isTrue);
+        expect(fixture.controller.closeCount, 0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
+    'gesture and repeated background releases cancel queued keyboard input',
+    (tester) async {
+      final fixture = _PageFixture();
+      await tester.pumpWidget(_app(fixture.page()));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mobile-keyboard-toggle')));
+      await tester.pump();
+      final keyboard = tester
+          .widget<MobileInputTray>(find.byType(MobileInputTray))
+          .controller!;
+      await keyboard.setModifier(MobileModifierKey.control, true);
+      await tester.pump();
+
+      final gate = Completer<void>();
+      fixture.reliable.nextSendGate = gate;
+      addTearDown(() {
+        fixture.controller.sender?.abort();
+        if (!gate.isCompleted) gate.complete();
+      });
+      final finger = await tester.startGesture(
+        tester.getCenter(
+          find.byKey(const Key('mobile-remote-gesture-surface')),
+        ),
+        pointer: 1,
+      );
+      await tester.pump(const Duration(milliseconds: 501));
+      final text = _inputError(keyboard.sendText('cancelled text'));
+      final special = _inputError(keyboard.sendSpecial(MobileSpecialKey.tab));
+      await finger.cancel();
+      await tester.pump();
+      expect(await text, InputSenderErrorCode.cancelled);
+      expect(await special, InputSenderErrorCode.cancelled);
+      expect(keyboard.activeModifiers, isEmpty);
+      expect(
+        tester
+            .widget<FilterChip>(
+              find.byKey(const Key('mobile-modifier-control')),
+            )
+            .selected,
+        isFalse,
+      );
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      final newModifier = _inputError(
+        keyboard.setModifier(MobileModifierKey.control, true),
+      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      expect(await newModifier, InputSenderErrorCode.cancelled);
+      expect(keyboard.activeModifiers, isEmpty);
+
+      gate.complete();
+      await tester.pump();
+      final events = fixture.reliable.decoded;
+      expect(events.where((event) => event.hasReleaseAllInput()), hasLength(1));
+      expect(events.where((event) => event.hasText()), isEmpty);
+      expect(
+        events
+            .where((event) => event.hasKeyboard())
+            .map((event) => event.keyboard.usbHidUsage),
+        <int>[0xe0],
+      );
+      expect(fixture.controller.closeCount, 0);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(fixture.controller.closeCount, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'replacing the sender and surface keeps old release in its session',
+    (tester) async {
+      final fixture = _PageFixture();
+      await tester.pumpWidget(_app(fixture.page(videoAspectRatio: null)));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('mobile-keyboard-toggle')));
+      await tester.pump();
+      final previous = tester
+          .widget<MobileInputTray>(find.byType(MobileInputTray))
+          .controller!;
+      await previous.setModifier(MobileModifierKey.control, true);
+      await tester.pump();
+
+      final reliable = _CaptureChannel();
+      final renderer = RTCVideoRenderer();
+      addTearDown(() => unawaited(renderer.dispose()));
+      fixture.controller
+        ..sender = RemoteInputSender(
+          sessionId: List<int>.filled(16, 0x52),
+          reliable: reliable,
+          fast: _CaptureChannel(),
+        )
+        ..renderer = renderer
+        ..notifyListeners();
+      await tester.pump();
+      await tester.pump();
+
+      expect(previous.activeModifiers, isEmpty);
+      expect(
+        fixture.reliable.decoded.where((event) => event.hasReleaseAllInput()),
+        hasLength(1),
+      );
+      expect(reliable.sent, isEmpty);
+      final current = tester
+          .widget<MobileInputTray>(find.byType(MobileInputTray))
+          .controller!;
+      expect(current, isNot(same(previous)));
+      await current.setModifier(MobileModifierKey.control, true);
+      final finger = await tester.startGesture(
+        tester.getCenter(
+          find.byKey(const Key('mobile-remote-gesture-surface')),
+        ),
+      );
+      await finger.cancel();
+      await tester.pump();
+      expect(current.activeModifiers, isEmpty);
+      expect(
+        tester
+            .widget<FilterChip>(
+              find.byKey(const Key('mobile-modifier-control')),
+            )
+            .selected,
+        isFalse,
+      );
+      expect(
+        reliable.decoded.where((event) => event.hasReleaseAllInput()),
+        hasLength(1),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('background closes and leaves the remote page after resume', (
     tester,
   ) async {
@@ -784,20 +998,22 @@ final class _PageFixture {
   final _CaptureChannel fast;
   final _FakeMobileViewModel controller;
 
-  MobileRemoteDesktopPage page() => MobileRemoteDesktopPage(
-    target: _target(),
-    controller: controller,
-    videoAspectRatio: 16 / 9,
-    videoBuilder: (context, renderer) => const ColoredBox(
-      key: Key('mobile-test-video'),
-      color: Colors.blue,
-      child: SizedBox.expand(),
-    ),
-  );
+  MobileRemoteDesktopPage page({double? videoAspectRatio = 16 / 9}) =>
+      MobileRemoteDesktopPage(
+        target: _target(),
+        controller: controller,
+        videoAspectRatio: videoAspectRatio,
+        videoBuilder: (context, renderer) => const ColoredBox(
+          key: Key('mobile-test-video'),
+          color: Colors.blue,
+          child: SizedBox.expand(),
+        ),
+      );
 }
 
 final class _CaptureChannel implements InputDataChannel {
   final List<Uint8List> sent = <Uint8List>[];
+  Completer<void>? nextSendGate;
 
   @override
   int get bufferedAmount => 0;
@@ -806,8 +1022,11 @@ final class _CaptureChannel implements InputDataChannel {
       sent.map(decodeAndValidateReliableInputEnvelope).toList(growable: false);
 
   @override
-  Future<void> send(Uint8List bytes) async {
+  Future<void> send(Uint8List bytes) {
     sent.add(Uint8List.fromList(bytes));
+    final gate = nextSendGate;
+    nextSendGate = null;
+    return gate?.future ?? Future<void>.value();
   }
 }
 
@@ -825,6 +1044,7 @@ final class _FakeMobileViewModel extends ChangeNotifier
   bool retryAvailable = false;
 
   RemoteInputSender? sender;
+  Object? renderer;
   int connectCount = 0;
   int closeCount = 0;
   int retryCount = 0;
@@ -844,7 +1064,7 @@ final class _FakeMobileViewModel extends ChangeNotifier
   RemoteReconnectProgress? get reconnectProgress => progress;
 
   @override
-  Object get videoRenderer => this;
+  Object get videoRenderer => renderer ?? this;
 
   @override
   Future<void> connect(RemoteDesktopTarget target) async {
@@ -867,6 +1087,12 @@ final class _FakeMobileViewModel extends ChangeNotifier
     retryCount += 1;
   }
 }
+
+Future<InputSenderErrorCode?> _inputError(Future<void> operation) =>
+    operation.then<InputSenderErrorCode?>(
+      (_) => null,
+      onError: (Object error) => (error as InputSenderException).code,
+    );
 
 RemoteDesktopTarget _target() {
   final publicKey = List<int>.generate(32, (index) => index + 1);

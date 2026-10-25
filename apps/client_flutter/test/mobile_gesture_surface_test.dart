@@ -9,6 +9,55 @@ import 'package:roammand/mobile/remote/mobile_gesture_surface.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
 void main() {
+  testWidgets('pointer cancellation falls back to releasing the sender', (
+    tester,
+  ) async {
+    final fixture = _SurfaceFixture();
+    await tester.pumpWidget(fixture.app());
+    await fixture.sender.sendKeyboard(
+      action: KeyboardAction.KEYBOARD_ACTION_DOWN,
+      usbHidUsage: 0xe0,
+      modifierBits: 1,
+    );
+    final finger = await tester.startGesture(tester.getCenter(fixture.surface));
+    await finger.cancel();
+    await tester.pump();
+
+    expect(
+      fixture.reliableEvents.where((event) => event.hasReleaseAllInput()),
+      hasLength(1),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('owner cancellation suppresses its release callback', (
+    tester,
+  ) async {
+    final fixture = _SurfaceFixture();
+    final controller = MobileGestureSurfaceController();
+    var releases = 0;
+    await tester.pumpWidget(
+      fixture.app(
+        controller: controller,
+        releaseInput: () async {
+          releases++;
+        },
+      ),
+    );
+    final first = await tester.startGesture(tester.getCenter(fixture.surface));
+    controller.cancel(releaseInput: false);
+    await first.up();
+    await tester.pump();
+    expect(releases, 0);
+
+    final second = await tester.startGesture(tester.getCenter(fixture.surface));
+    controller.cancel();
+    await second.up();
+    await tester.pump();
+    expect(releases, 1);
+    expect(fixture.reliableEvents, isEmpty);
+  });
+
   testWidgets('maps double tap to one reliable double-click', (tester) async {
     final fixture = _SurfaceFixture();
     await tester.pumpWidget(fixture.app());
@@ -184,13 +233,19 @@ final class _SurfaceFixture {
       .map(decodeAndValidatePointerFastEnvelope)
       .toList(growable: false);
 
-  Widget app({void Function(Object error)? onInputFailure}) => MaterialApp(
+  Widget app({
+    void Function(Object error)? onInputFailure,
+    MobileGestureSurfaceController? controller,
+    Future<void> Function()? releaseInput,
+  }) => MaterialApp(
     home: Scaffold(
       body: Center(
         child: SizedBox.square(
           dimension: 400,
           child: MobileGestureSurface(
             sender: sender,
+            controller: controller,
+            releaseInput: releaseInput,
             onInputFailure: onInputFailure,
             videoAspectRatio: 1,
             video: const ColoredBox(

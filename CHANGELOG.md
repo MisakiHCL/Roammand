@@ -27,6 +27,8 @@ and released versions follow semantic versioning.
   Controller recovery offers.
 - Refreshed mobile modifier buttons when cancellation, input release, or close
   clears their pressed state asynchronously.
+- Synchronized mobile modifier state during gesture cancellation even when no
+  keyboard input is queued, so later keys use the released modifier state.
 - Kept retained-session expiry and local Stop active while Host signaling is
   reconnecting, including during connection attempts and retry delays.
 - Prevented gesture-triggered keyboard cancellation from being treated as a
