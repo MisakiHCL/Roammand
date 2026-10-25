@@ -14,6 +14,21 @@ const _answerSdp = 'v=0\r\na=fingerprint:sha-256 CC:DD\r\n';
 const _restartOfferSdp = 'v=0\r\na=fingerprint:sha-256 DD:EE\r\n';
 
 void main() {
+  test('input channels expose independent native buffering', () async {
+    final adapter = _FakePeerAdapter()
+      ..reliableBufferedAmount = 12345
+      ..fastBufferedAmount = 67890;
+    final session = ControllerPeerSession(
+      adapter: adapter,
+      configuration: const ControllerPeerConfiguration(),
+    );
+    expect(session.reliableInput.bufferedAmount, 12345);
+    expect(session.fastInput.bufferedAmount, 67890);
+    adapter.reliableBufferedAmount = 321;
+    expect(session.reliableInput.bufferedAmount, 321);
+    await session.close();
+  });
+
   test(
     'initializes renderer, peer, exact channels, codecs and ICE policy',
     () async {
@@ -282,7 +297,13 @@ final class _FakePeerAdapter implements ControllerPeerAdapter {
   ControllerPeerCallbacks? _callbacks;
 
   @override
-  int get fastBufferedAmount => 0;
+  int reliableBufferedAmount = 0;
+
+  @override
+  Future<int> readReliableBufferedAmount() async => reliableBufferedAmount;
+
+  @override
+  int fastBufferedAmount = 0;
 
   @override
   Object get renderer => videoRenderer;

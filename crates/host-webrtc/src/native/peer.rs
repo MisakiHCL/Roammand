@@ -527,21 +527,7 @@ fn configure_callbacks(
                 message_publisher.overflowed.store(true, Ordering::Release);
                 return;
             }
-            let payload = buffer.data.to_vec();
-            match kind {
-                NativeDataChannelKind::ReliableInput => {
-                    if payload.len() > MAX_RELIABLE_INPUT_ENVELOPE_BYTES {
-                        message_publisher.overflowed.store(true, Ordering::Release);
-                    } else {
-                        message_publisher.critical(NativePeerEvent::ReliableInput(payload));
-                    }
-                }
-                NativeDataChannelKind::FastPointer => {
-                    if payload.len() <= MAX_POINTER_FAST_ENVELOPE_BYTES {
-                        message_publisher.fast_pointer(payload);
-                    }
-                }
-            }
+            publish_input_payload(&message_publisher, kind, buffer.data);
         })));
         let state_publisher = data_publisher.clone();
         channel.on_state_change(Some(Box::new(move |state| {
@@ -558,6 +544,27 @@ fn configure_callbacks(
             data_publisher.overflowed.store(true, Ordering::Release);
         }
     })));
+}
+
+fn publish_input_payload(publisher: &EventPublisher, kind: NativeDataChannelKind, data: &[u8]) {
+    // Validate the borrowed native payload before allocating its owned copy.
+    match kind {
+        NativeDataChannelKind::ReliableInput if data.len() > MAX_RELIABLE_INPUT_ENVELOPE_BYTES => {
+            publisher.overflowed.store(true, Ordering::Release);
+            return;
+        }
+        NativeDataChannelKind::FastPointer if data.len() > MAX_POINTER_FAST_ENVELOPE_BYTES => {
+            return;
+        }
+        _ => {}
+    }
+    let payload = data.to_vec();
+    match kind {
+        NativeDataChannelKind::ReliableInput => {
+            publisher.critical(NativePeerEvent::ReliableInput(payload));
+        }
+        NativeDataChannelKind::FastPointer => publisher.fast_pointer(payload),
+    }
 }
 
 #[must_use]
@@ -628,6 +635,35 @@ pub fn parse_dtls_sha256_fingerprint(sdp: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_input_payloads_do_not_enter_event_queues() {
+        let (peer, events) = NativePeerBackend::new(NativePeerOptions::default());
+        publish_input_payload(&peer.publisher, NativeDataChannelKind::FastPointer, &[7]);
+        publish_input_payload(
+            &peer.publisher,
+            NativeDataChannelKind::FastPointer,
+            &vec![0; MAX_POINTER_FAST_ENVELOPE_BYTES + 1],
+        );
+        assert_eq!(
+            events.recv_timeout(Duration::ZERO),
+            Ok(NativePeerEvent::FastPointer(vec![7]))
+        );
+
+        publish_input_payload(
+            &peer.publisher,
+            NativeDataChannelKind::ReliableInput,
+            &vec![0; MAX_RELIABLE_INPUT_ENVELOPE_BYTES + 1],
+        );
+        assert_eq!(
+            events.recv_timeout(Duration::ZERO),
+            Err(NativePeerEventReceiveError::Overflow)
+        );
+        assert_eq!(
+            events.recv_timeout(Duration::ZERO),
+            Err(NativePeerEventReceiveError::Empty)
+        );
+    }
 
     #[test]
     fn fast_pointer_events_coalesce_without_filling_the_critical_queue() {

@@ -226,6 +226,20 @@ impl HostPairingCoordinator {
         self.status.clone()
     }
 
+    pub(crate) const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn deadline_unix_ms(&self) -> Option<u64> {
+        self.active
+            .as_ref()
+            .map(|active| active.invitation.expires_at_unix_ms)
+    }
+
+    pub(crate) fn has_outbound(&self) -> bool {
+        !self.outbound.is_empty()
+    }
+
     /// Starts a two-minute QR or desktop-code invitation.
     ///
     /// # Errors

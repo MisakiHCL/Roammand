@@ -84,6 +84,22 @@ void main() {
     expect(fixture.controller.state, RemoteDesktopState.connected);
   });
 
+  test('reliable input failure closes every session resource', () async {
+    final fixture = await _Fixture.create();
+    await fixture.connectFully();
+    fixture.adapter.failReliable = true;
+    await expectLater(
+      fixture.controller.inputSender!.sendText('fails'),
+      throwsA(isA<Exception>()),
+    );
+    await _pumpEvents();
+    expect(fixture.controller.state, RemoteDesktopState.failed);
+    expect(fixture.adapter.closeCount, 1);
+    expect(fixture.signaling.closeCount, 1);
+    expect(fixture.agent.closeCount, 1);
+    await fixture.controller.close();
+  });
+
   test('hashes the exact UTF-8 offer bytes used on the wire', () async {
     const utf8OfferSdp =
         'v=0\r\ns=\u8fdc\u7a0b\u684c\u9762\r\na=fingerprint:sha-256 44:44\r\n';
@@ -1040,9 +1056,16 @@ final class _FakePeerAdapter implements ControllerPeerAdapter {
   int restartCount = 0;
   int answerCount = 0;
   bool failClose = false;
+  bool failReliable = false;
   Completer<void>? answerGate;
   Completer<void>? closeGate;
   final List<Uint8List> reliableSent = <Uint8List>[];
+
+  @override
+  int get reliableBufferedAmount => 0;
+
+  @override
+  Future<int> readReliableBufferedAmount() async => reliableBufferedAmount;
 
   @override
   int get fastBufferedAmount => 0;
@@ -1094,6 +1117,7 @@ final class _FakePeerAdapter implements ControllerPeerAdapter {
 
   @override
   Future<void> sendReliable(Uint8List bytes) async {
+    if (failReliable) throw StateError('native channel rejected input');
     reliableSent.add(Uint8List.fromList(bytes));
   }
 

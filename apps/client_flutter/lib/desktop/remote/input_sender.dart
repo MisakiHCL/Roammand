@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -9,6 +10,12 @@ import 'package:roammand_protocol/roammand_protocol.dart';
 
 const pointerFrameInterval = Duration(microseconds: 16667);
 const maxFastBufferedAmount = 256 * 1024;
+const maxReliableBufferedAmount = 64 * 1024;
+const reliableBufferedLowWatermark = maxReliableBufferedAmount ~/ 2;
+const maxPendingReliableInputEvents = 64;
+const maxPendingReliableInputBytes = 64 * 1024;
+const reliableInputTimeout = Duration(seconds: 2);
+const _reliableBufferRetryInterval = Duration(milliseconds: 16);
 const remoteInputCoordinateMaximum = 10000;
 const maxRemoteTextInputBytes = 1024;
 const maxRemoteScrollDelta = 10000;
@@ -20,6 +27,14 @@ abstract interface class InputDataChannel {
   int get bufferedAmount;
 
   Future<void> send(Uint8List bytes);
+}
+
+/// Native adapters may cache bufferedAmount until a platform event arrives.
+/// A paused reliable queue refreshes that cache even on platforms without
+/// buffered-amount change notifications.
+abstract interface class RefreshableInputDataChannel
+    implements InputDataChannel {
+  Future<int> readBufferedAmount();
 }
 
 abstract interface class InputFrameScheduler {
@@ -54,6 +69,7 @@ enum InputSenderErrorCode {
   suspended,
   closed,
   channel,
+  cancelled,
 }
 
 final class InputSenderException implements Exception {
@@ -71,11 +87,15 @@ final class RemoteInputSender {
     required InputDataChannel reliable,
     required InputDataChannel fast,
     InputFrameScheduler? frameScheduler,
+    Duration reliableSendTimeout = reliableInputTimeout,
+    void Function()? onReliableFailure,
   }) => RemoteInputSender._(
     Uint8List.fromList(sessionId),
     reliable,
     fast,
     frameScheduler ?? TimerInputFrameScheduler(),
+    reliableSendTimeout,
+    onReliableFailure,
   );
 
   RemoteInputSender._(
@@ -83,7 +103,12 @@ final class RemoteInputSender {
     this._reliable,
     this._fast,
     this._frameScheduler,
+    this._reliableSendTimeout,
+    this._onReliableFailure,
   ) {
+    if (_reliableSendTimeout <= Duration.zero) {
+      throw ArgumentError.value(_reliableSendTimeout, 'reliableSendTimeout');
+    }
     if (_sessionId.length != sessionIdBytes) {
       throw const InputSenderException(InputSenderErrorCode.invalidSession);
     }
@@ -93,6 +118,16 @@ final class RemoteInputSender {
   final InputDataChannel _reliable;
   final InputDataChannel _fast;
   final InputFrameScheduler _frameScheduler;
+  final Duration _reliableSendTimeout;
+  final void Function()? _onReliableFailure;
+  final Queue<_ReliableInputTask> _reliableQueue = Queue<_ReliableInputTask>();
+  _ReliableInputTask? _activeReliable;
+  Timer? _reliableRetryTimer;
+  int _pendingReliableBytes = 0;
+  bool _reliableFailed = false;
+  bool _reliableBufferPaused = false;
+  bool _reliableBufferReadInFlight = false;
+  Future<void>? _closeFuture;
 
   int _reliableSequence = 0;
   int _fastSequence = 0;
@@ -216,22 +251,32 @@ final class RemoteInputSender {
     if (_closed || _releaseSent) {
       return;
     }
+    _pendingMove = null;
+    if (_frameScheduled) {
+      _frameScheduler.cancel();
+      _frameScheduled = false;
+    }
+    _cancelQueuedReliable();
     _releaseSent = true;
     await _sendReliable(
       ReliableInputEnvelope(releaseAllInput: ReleaseAllInput()),
     );
   }
 
-  Future<void> close() async {
+  Future<void> close() => _closeFuture ??= _close();
+
+  Future<void> _close() async {
     if (_closed) {
       return;
     }
     _closed = true;
+    _cancelQueuedReliable();
     _pendingMove = null;
     if (_frameScheduled) {
       _frameScheduler.cancel();
       _frameScheduled = false;
     }
+    if (_reliableFailed) return;
     if (!_releaseSent) {
       _releaseSent = true;
       await _sendReliable(
@@ -261,7 +306,7 @@ final class RemoteInputSender {
   }
 
   void resume() {
-    if (_closed) {
+    if (_closed || _reliableFailed) {
       throw const InputSenderException(InputSenderErrorCode.closed);
     }
     _suspended = false;
@@ -330,19 +375,149 @@ final class RemoteInputSender {
     }
   }
 
-  Future<void> _sendReliable(ReliableInputEnvelope envelope) async {
+  Future<void> _sendReliable(ReliableInputEnvelope envelope) {
+    if (_reliableFailed) {
+      return Future<void>.error(
+        const InputSenderException(InputSenderErrorCode.channel),
+      );
+    }
     envelope
       ..protocolVersion = _version()
       ..sessionId = _sessionId
-      ..sequence = Int64(++_reliableSequence);
-    final encoded = Uint8List.fromList(envelope.writeToBuffer());
-    if (encoded.length > maxReliableInputEnvelopeBytes) {
-      throw const InputSenderException(InputSenderErrorCode.channel);
+      ..sequence = Int64(-1);
+    // Reserve the largest sequence encoding; assign the contiguous wire
+    // sequence only when dispatching, since queued work can be cancelled.
+    final encoded = envelope.writeToBuffer();
+    if (encoded.length > maxReliableInputEnvelopeBytes ||
+        _reliableQueue.length + (_activeReliable == null ? 0 : 1) >=
+            maxPendingReliableInputEvents ||
+        _pendingReliableBytes + encoded.length > maxPendingReliableInputBytes) {
+      abort();
+      return Future<void>.error(
+        const InputSenderException(InputSenderErrorCode.channel),
+      );
+    }
+    final task = _ReliableInputTask(envelope, encoded.length);
+    task.timer = Timer(_reliableSendTimeout, abort);
+    _reliableQueue.addLast(task);
+    _pendingReliableBytes += encoded.length;
+    _pumpReliable();
+    return task.completer.future;
+  }
+
+  void _pumpReliable() {
+    if (_reliableFailed ||
+        _activeReliable != null ||
+        _reliableQueue.isEmpty ||
+        _reliableBufferReadInFlight) {
+      return;
+    }
+    final channel = _reliable;
+    if (_reliableBufferPaused && channel is RefreshableInputDataChannel) {
+      _reliableBufferReadInFlight = true;
+      unawaited(
+        Future<int>.sync(channel.readBufferedAmount)
+            .timeout(_reliableSendTimeout)
+            .then(
+              (amount) {
+                _reliableBufferReadInFlight = false;
+                _dispatchReliable(amount);
+              },
+              onError: (Object _, StackTrace _) {
+                _reliableBufferReadInFlight = false;
+                abort();
+              },
+            ),
+      );
+      return;
     }
     try {
-      await _reliable.send(encoded);
+      _dispatchReliable(_reliable.bufferedAmount);
     } catch (_) {
-      throw const InputSenderException(InputSenderErrorCode.channel);
+      abort();
+    }
+  }
+
+  void _dispatchReliable(int bufferedAmount) {
+    if (_reliableFailed || _activeReliable != null || _reliableQueue.isEmpty) {
+      return;
+    }
+    final task = _reliableQueue.first;
+    try {
+      if (_reliableBufferPaused
+          ? bufferedAmount > reliableBufferedLowWatermark
+          : bufferedAmount + task.budgetBytes > maxReliableBufferedAmount) {
+        _reliableBufferPaused = true;
+        _reliableRetryTimer ??= Timer(_reliableBufferRetryInterval, () {
+          _reliableRetryTimer = null;
+          _pumpReliable();
+        });
+        return;
+      }
+      _reliableBufferPaused = false;
+      _reliableQueue.removeFirst();
+      _activeReliable = task;
+      unawaited(
+        _reliable
+            .send(
+              (task.envelope..sequence = Int64(++_reliableSequence))
+                  .writeToBuffer(),
+            )
+            .then((_) {
+              // A timed-out native call cannot be cancelled. Its late completion
+              // must never resume the abandoned input queue.
+              if (_reliableFailed || !identical(_activeReliable, task)) return;
+              _activeReliable = null;
+              _pendingReliableBytes -= task.budgetBytes;
+              task.timer?.cancel();
+              task.completer.complete();
+              _pumpReliable();
+            }, onError: (Object _, StackTrace _) => abort()),
+      );
+    } catch (_) {
+      abort();
+    }
+  }
+
+  /// Ends input after congestion or an uncertain send. The owner must close
+  /// the peer so the Host releases pressed input even if this channel is stuck.
+  void abort() {
+    if (_reliableFailed) return;
+    _reliableFailed = true;
+    _suspended = true;
+    _pendingMove = null;
+    _frameScheduler.cancel();
+    _frameScheduled = false;
+    _reliableRetryTimer?.cancel();
+    _reliableRetryTimer = null;
+    final active = _activeReliable;
+    _activeReliable = null;
+    if (active != null) _failReliableTask(active, InputSenderErrorCode.channel);
+    while (_reliableQueue.isNotEmpty) {
+      _failReliableTask(
+        _reliableQueue.removeFirst(),
+        InputSenderErrorCode.channel,
+      );
+    }
+    _pendingReliableBytes = 0;
+    _onReliableFailure?.call();
+  }
+
+  void _cancelQueuedReliable() {
+    _reliableRetryTimer?.cancel();
+    _reliableRetryTimer = null;
+    while (_reliableQueue.isNotEmpty) {
+      final task = _reliableQueue.removeFirst();
+      _pendingReliableBytes -= task.budgetBytes;
+      if (task.releasesInput) _releaseSent = false;
+      _failReliableTask(task, InputSenderErrorCode.cancelled);
+    }
+  }
+
+  void _failReliableTask(_ReliableInputTask task, InputSenderErrorCode code) {
+    task.timer?.cancel();
+    if (!task.completer.isCompleted) {
+      task.completer.completeError(InputSenderException(code));
     }
   }
 
@@ -366,10 +541,23 @@ final class RemoteInputSender {
     if (_closed) {
       throw const InputSenderException(InputSenderErrorCode.closed);
     }
+    if (_reliableFailed) {
+      throw const InputSenderException(InputSenderErrorCode.channel);
+    }
     if (_suspended) {
       throw const InputSenderException(InputSenderErrorCode.suspended);
     }
   }
+}
+
+final class _ReliableInputTask {
+  _ReliableInputTask(this.envelope, this.budgetBytes);
+
+  final ReliableInputEnvelope envelope;
+  final int budgetBytes;
+  bool get releasesInput => envelope.hasReleaseAllInput();
+  final Completer<void> completer = Completer<void>();
+  Timer? timer;
 }
 
 final class _PendingPointerMove {

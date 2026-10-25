@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:roammand/desktop/remote/input_sender.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
@@ -33,13 +34,29 @@ const _specialUsages = <MobileSpecialKey, int>{
   MobileSpecialKey.arrowUp: 0x52,
 };
 
+const maxPendingMobileKeyboardOperations = 32;
+const maxPendingMobileKeyboardTextBytes = 32 * 1024;
+
 final class MobileKeyboardController {
-  MobileKeyboardController(this._sender);
+  MobileKeyboardController(
+    this._sender, {
+    this.operationTimeout = reliableInputTimeout,
+  }) {
+    if (operationTimeout <= Duration.zero) {
+      throw ArgumentError.value(operationTimeout, 'operationTimeout');
+    }
+  }
 
   final RemoteInputSender _sender;
   final Set<MobileModifierKey> _activeModifiers = <MobileModifierKey>{};
 
-  Future<void> _tail = Future<void>.value();
+  final Duration operationTimeout;
+  final Queue<_KeyboardOperation> _pending = Queue<_KeyboardOperation>();
+  _KeyboardOperation? _active;
+  Future<void>? _closeFuture;
+  Future<void> _lastOperation = Future<void>.value();
+  int _pendingTextBytes = 0;
+  int _generation = 0;
   bool _closed = false;
 
   Set<MobileModifierKey> get activeModifiers =>
@@ -56,7 +73,7 @@ final class MobileKeyboardController {
         ? _activeModifiers.add(modifier)
         : _activeModifiers.remove(modifier);
     if (!changed) {
-      return _tail;
+      return _lastOperation;
     }
     final usage = _modifierUsages[modifier]!;
     final bits = _currentModifierBits();
@@ -77,12 +94,16 @@ final class MobileKeyboardController {
     }
     final usage = _specialUsages[key]!;
     final bits = _currentModifierBits();
+    final generation = _generation;
     return _enqueue(() async {
       await _sender.sendKeyboard(
         action: KeyboardAction.KEYBOARD_ACTION_DOWN,
         usbHidUsage: usage,
         modifierBits: bits,
       );
+      if (_generation != generation) {
+        throw const InputSenderException(InputSenderErrorCode.cancelled);
+      }
       await _sender.sendKeyboard(
         action: KeyboardAction.KEYBOARD_ACTION_UP,
         usbHidUsage: usage,
@@ -95,25 +116,31 @@ final class MobileKeyboardController {
     if (_closed) {
       return _closedFuture();
     }
-    return _enqueue(() => _sender.sendText(text));
+    final textBytes = utf8.encode(text).length;
+    if (textBytes == 0 || textBytes > maxRemoteTextInputBytes) {
+      return Future<void>.error(
+        const InputSenderException(InputSenderErrorCode.invalidText),
+      );
+    }
+    return _enqueue(() => _sender.sendText(text), textBytes: textBytes);
   }
 
   Future<void> releaseAll() {
-    if (_closed) {
-      return _tail;
-    }
+    if (_closed) return _closeFuture ?? Future<void>.value();
+    _cancelOperations(InputSenderErrorCode.cancelled);
     _activeModifiers.clear();
     return _enqueue(_sender.releaseAll);
   }
 
   Future<void> close() {
-    if (_closed) {
-      return _tail;
-    }
-    _activeModifiers.clear();
-    final closing = _enqueue(_sender.releaseAll);
+    final existing = _closeFuture;
+    if (existing != null) return existing;
     _closed = true;
-    return closing;
+    _cancelOperations(InputSenderErrorCode.cancelled);
+    _activeModifiers.clear();
+    // The sender serializes release behind any call already submitted to the
+    // native channel and applies its own bounded send deadline.
+    return _closeFuture = _sender.releaseAll().catchError((_) {});
   }
 
   int _currentModifierBits() => _activeModifiers.fold<int>(
@@ -121,19 +148,96 @@ final class MobileKeyboardController {
     (bits, modifier) => bits | _modifierBits[modifier]!,
   );
 
-  Future<void> _enqueue(Future<void> Function() operation) {
-    final completer = Completer<void>();
-    _tail = _tail.then((_) async {
-      try {
-        await operation();
-        completer.complete();
-      } catch (error, stackTrace) {
-        completer.completeError(error, stackTrace);
-      }
-    });
-    return completer.future;
+  Future<void> _enqueue(
+    Future<void> Function() operation, {
+    int textBytes = 0,
+  }) {
+    if (_pending.length + (_active == null ? 0 : 1) >=
+            maxPendingMobileKeyboardOperations ||
+        _pendingTextBytes + textBytes > maxPendingMobileKeyboardTextBytes) {
+      _abort();
+      return Future<void>.error(
+        const InputSenderException(InputSenderErrorCode.channel),
+      );
+    }
+    final task = _KeyboardOperation(operation, textBytes);
+    task.timer = Timer(operationTimeout, _abort);
+    _pending.addLast(task);
+    _pendingTextBytes += textBytes;
+    _lastOperation = task.completer.future;
+    _pump();
+    return task.completer.future;
+  }
+
+  void _pump() {
+    if (_closed || _active != null || _pending.isEmpty) return;
+    final task = _pending.removeFirst();
+    _active = task;
+    unawaited(
+      Future<void>.sync(task.operation).then(
+        (_) {
+          if (!identical(_active, task)) return;
+          _active = null;
+          _pendingTextBytes -= task.textBytes;
+          task.timer?.cancel();
+          task.completer.complete();
+          _pump();
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!identical(_active, task)) return;
+          if (error is InputSenderException &&
+              error.code == InputSenderErrorCode.cancelled) {
+            // Gestures share the sender and can release input directly. Their
+            // release cancels queued keyboard work without failing the peer.
+            _activeModifiers.clear();
+            _cancelOperations(InputSenderErrorCode.cancelled);
+            return;
+          }
+          task.timer?.cancel();
+          task.completer.completeError(error, stackTrace);
+          _active = null;
+          _pendingTextBytes -= task.textBytes;
+          _abort();
+        },
+      ),
+    );
+  }
+
+  void _abort() {
+    if (_closed) return;
+    _closed = true;
+    _activeModifiers.clear();
+    _cancelOperations(InputSenderErrorCode.channel);
+    _sender.abort();
+  }
+
+  void _cancelOperations(InputSenderErrorCode code) {
+    _generation += 1;
+    final active = _active;
+    _active = null;
+    if (active != null) _failOperation(active, code);
+    while (_pending.isNotEmpty) {
+      _failOperation(_pending.removeFirst(), code);
+    }
+    _pendingTextBytes = 0;
+  }
+
+  void _failOperation(_KeyboardOperation task, InputSenderErrorCode code) {
+    task.timer?.cancel();
+    if (!task.completer.isCompleted) {
+      task.completer.completeError(InputSenderException(code));
+    }
   }
 
   Future<void> _closedFuture() =>
       Future<void>.error(StateError('mobile keyboard controller is closed'));
+}
+
+final class _KeyboardOperation {
+  _KeyboardOperation(this.operation, this.textBytes);
+
+  final Future<void> Function() operation;
+  final int textBytes;
+  final Completer<void> completer = Completer<void>();
+  Timer? timer;
 }

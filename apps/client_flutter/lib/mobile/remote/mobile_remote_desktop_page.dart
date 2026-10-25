@@ -651,7 +651,11 @@ final class _MobileRemoteDesktopPageState extends State<MobileRemoteDesktopPage>
 
   void _releaseInput() {
     _gestureController.cancel();
-    unawaited(_keyboardController?.releaseAll() ?? Future<void>.value());
+    unawaited(
+      (_keyboardController?.releaseAll() ?? Future<void>.value()).catchError(
+        _handleInputFailure,
+      ),
+    );
   }
 
   void _setPrivacyShieldVisible(bool visible) {
@@ -694,6 +698,10 @@ final class _MobileRemoteDesktopPageState extends State<MobileRemoteDesktopPage>
   }
 
   void _handleInputFailure(Object error) {
+    if (error is InputSenderException &&
+        error.code == InputSenderErrorCode.cancelled) {
+      return;
+    }
     if (kDebugMode) {
       final cause = switch (error) {
         InputSenderException(:final code) => code.name,

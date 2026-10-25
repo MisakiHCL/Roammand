@@ -448,6 +448,60 @@ impl RemoteSessionCoordinator {
         )
     }
 
+    /// Drains a bounded batch without imposing one timer interval per input.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable peer or event-processing error. The time budget yields
+    /// between events so signaling and local termination remain responsive.
+    pub fn poll_peer_events(
+        &mut self,
+        now_unix_ms: u64,
+    ) -> Result<Vec<RemoteSessionOutbound>, RemoteSessionError> {
+        self.poll_peer_events_with_budget(now_unix_ms, std::time::Duration::from_millis(2))
+    }
+
+    pub(crate) fn poll_peer_events_with_budget(
+        &mut self,
+        now_unix_ms: u64,
+        time_budget: std::time::Duration,
+    ) -> Result<Vec<RemoteSessionOutbound>, RemoteSessionError> {
+        const MAX_EVENTS: usize = 64;
+        if self.expire_active_reconnect(now_unix_ms)? {
+            return Ok(Vec::new());
+        }
+        let started = std::time::Instant::now();
+        let mut outbound = Vec::new();
+        for _ in 0..MAX_EVENTS {
+            let Some(event) = self
+                .active
+                .as_ref()
+                .map(|active| active.events.try_recv())
+                .transpose()?
+                .flatten()
+            else {
+                break;
+            };
+            outbound.extend(self.handle_peer_event(event, now_unix_ms)?);
+            // Yield before any network send: a batch of ICE messages must not
+            // multiply the transport timeout while local stops wait to run.
+            if !outbound.is_empty() || started.elapsed() >= time_budget {
+                break;
+            }
+        }
+        Ok(outbound)
+    }
+
+    pub(crate) fn has_active_session(&self) -> bool {
+        self.active.is_some()
+    }
+
+    pub(crate) fn reconnect_deadline_unix_ms(&self) -> Option<u64> {
+        self.active
+            .as_ref()
+            .and_then(|active| active.reconnect_deadline_unix_ms)
+    }
+
     /// Closes an active session after a trusted local termination request.
     ///
     /// # Errors

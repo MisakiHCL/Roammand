@@ -10,8 +10,22 @@ and released versions follow semantic versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced screen-capture memory copying and skipped pixel conversion when a
+  captured frame is already waiting to be processed.
+- Bounded reliable input and mobile keyboard queues, waited for native send
+  buffers to drain, and cancelled stale queued input during release and close.
+- Batched Host input processing, removed idle pairing polling, and added bounded
+  exponential signaling reconnect delays with jitter.
+- Replaced per-request pairing-cache scans with an indexed expiration heap.
+
 ### Fixed
 
+- Kept retained-session expiry and local Stop active while Host signaling is
+  reconnecting, including during connection attempts and retry delays.
+- Prevented gesture-triggered keyboard cancellation from being treated as a
+  channel failure that disconnects an otherwise healthy remote session.
 - Updated CodeQL initialization and analysis together to 4.38.2 and grouped
   future Dependabot CodeQL updates to prevent incompatible scanner versions.
 - Kept expired signaling connections reserved until their pairing state is

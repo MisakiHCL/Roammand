@@ -303,6 +303,232 @@ void main() {
     expect(events[2].text.text, text);
   });
 
+  testWidgets('reliable congestion waits for native buffer to drain', (
+    tester,
+  ) async {
+    final reliable = _FakeInputChannel(
+      bufferedAmount: maxReliableBufferedAmount,
+    );
+    final sender = RemoteInputSender(
+      sessionId: _sessionId,
+      reliable: reliable,
+      fast: _FakeInputChannel(),
+    );
+    final sent = sender.sendText('waiting');
+    await tester.pump(const Duration(milliseconds: 32));
+    expect(reliable.sent, isEmpty);
+
+    reliable.bufferedAmount = reliableBufferedLowWatermark + 1;
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(reliable.sent, isEmpty);
+    reliable.bufferedAmount = reliableBufferedLowWatermark;
+    await tester.pump(const Duration(milliseconds: 16));
+    await sent;
+    expect(reliable.sent, hasLength(1));
+    await sender.close();
+  });
+
+  testWidgets('refreshes congestion without native buffered-amount events', (
+    tester,
+  ) async {
+    final reliable = _CachedNativeInputChannel();
+    final sender = RemoteInputSender(
+      sessionId: _sessionId,
+      reliable: reliable,
+      fast: _FakeInputChannel(),
+    );
+    final sent = sender.sendText('native drained without publishing an event');
+    expect(reliable.bufferedAmount, maxReliableBufferedAmount);
+    reliable.nativeBufferedAmount = 0;
+    await tester.pump(const Duration(milliseconds: 16));
+    await sent;
+    expect(reliable.bufferedAmount, maxReliableBufferedAmount);
+    expect(reliable.readCount, 1);
+    expect(reliable.sent, hasLength(1));
+    sender.abort();
+    await sender.close();
+  });
+
+  testWidgets('a stuck buffer refresh is bounded and late reads cannot send', (
+    tester,
+  ) async {
+    final refreshGate = Completer<int>();
+    final reliable = _CachedNativeInputChannel(refreshGate: refreshGate);
+    var failures = 0;
+    final sender = RemoteInputSender(
+      sessionId: _sessionId,
+      reliable: reliable,
+      fast: _FakeInputChannel(),
+      reliableSendTimeout: const Duration(milliseconds: 50),
+      onReliableFailure: () => failures++,
+    );
+    final first = _inputResult(sender.sendText('first'));
+    await tester.pump(const Duration(milliseconds: 16));
+    final queued = _inputResult(sender.sendText('queued during refresh'));
+    await tester.pump(const Duration(milliseconds: 34));
+    expect(reliable.readCount, 1);
+    expect(await first, InputSenderErrorCode.channel);
+    expect(await queued, InputSenderErrorCode.channel);
+    expect(failures, 1);
+    refreshGate.complete(0);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(reliable.sent, isEmpty);
+    expect(reliable.readCount, 1);
+    await sender.close();
+  });
+
+  test('serializes reliable calls in invocation order', () async {
+    final gate = Completer<void>();
+    final reliable = _FakeInputChannel(sendGate: gate);
+    final sender = RemoteInputSender(
+      sessionId: _sessionId,
+      reliable: reliable,
+      fast: _FakeInputChannel(),
+    );
+    final first = sender.sendText('first');
+    final second = sender.sendKeyboard(
+      action: KeyboardAction.KEYBOARD_ACTION_UP,
+      usbHidUsage: 0x04,
+    );
+    expect(reliable.sendCount, 1);
+    gate.complete();
+    await Future.wait(<Future<void>>[first, second]);
+    expect(reliable.maximumConcurrentSends, 1);
+    expect(
+      reliable.sent
+          .map(decodeAndValidateReliableInputEnvelope)
+          .map((event) => event.sequence.toInt()),
+      <int>[1, 2],
+    );
+    await sender.close();
+  });
+
+  testWidgets('reliable timeout fails queued input and ignores late send', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final reliable = _FakeInputChannel(sendGate: gate);
+    var failures = 0;
+    final sender = RemoteInputSender(
+      sessionId: _sessionId,
+      reliable: reliable,
+      fast: _FakeInputChannel(),
+      reliableSendTimeout: const Duration(milliseconds: 30),
+      onReliableFailure: () => failures++,
+    );
+    final first = _inputResult(sender.sendText('first'));
+    final queued = _inputResult(
+      sender.sendKeyboard(
+        action: KeyboardAction.KEYBOARD_ACTION_UP,
+        usbHidUsage: 0x04,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(await first, InputSenderErrorCode.channel);
+    expect(await queued, InputSenderErrorCode.channel);
+    expect(failures, 1);
+    await sender.close();
+    gate.complete();
+    await tester.pump();
+    expect(reliable.sent, hasLength(1));
+    expect(() => sender.sendText('late'), throwsA(isA<InputSenderException>()));
+  });
+
+  for (final largeText in <bool>[false, true]) {
+    test(
+      'bounds reliable ${largeText ? 'bytes' : 'event count'} and terminates',
+      () async {
+        final gate = Completer<void>();
+        final reliable = _FakeInputChannel(sendGate: gate);
+        var failures = 0;
+        final sender = RemoteInputSender(
+          sessionId: _sessionId,
+          reliable: reliable,
+          fast: _FakeInputChannel(),
+          onReliableFailure: () => failures++,
+        );
+        final pending = <Future<InputSenderErrorCode?>>[];
+        final text = largeText
+            ? List.filled(maxRemoteTextInputBytes, 'a').join()
+            : 'x';
+        while (failures == 0) {
+          pending.add(_inputResult(sender.sendText(text)));
+        }
+        expect(
+          pending.length,
+          lessThanOrEqualTo(maxPendingReliableInputEvents + 1),
+        );
+        if (largeText) {
+          expect(pending.length, lessThan(maxPendingReliableInputEvents));
+        }
+        expect(
+          await Future.wait(pending),
+          everyElement(InputSenderErrorCode.channel),
+        );
+        expect(failures, 1);
+        gate.complete();
+        await Future<void>.delayed(Duration.zero);
+        expect(reliable.sent, hasLength(1));
+        await sender.close();
+      },
+    );
+  }
+
+  testWidgets('permanent native congestion also has a send deadline', (
+    tester,
+  ) async {
+    final reliable = _FakeInputChannel(
+      bufferedAmount: maxReliableBufferedAmount,
+    );
+    var failures = 0;
+    final sender = RemoteInputSender(
+      sessionId: _sessionId,
+      reliable: reliable,
+      fast: _FakeInputChannel(),
+      reliableSendTimeout: const Duration(milliseconds: 30),
+      onReliableFailure: () => failures++,
+    );
+    final pending = _inputResult(sender.sendText('never enqueued natively'));
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(await pending, InputSenderErrorCode.channel);
+    expect(failures, 1);
+    expect(reliable.sent, isEmpty);
+    await sender.close();
+  });
+
+  test(
+    'close cancels queued ordinary input and preserves release ordering',
+    () async {
+      final gate = Completer<void>();
+      final reliable = _FakeInputChannel(sendGate: gate);
+      final sender = RemoteInputSender(
+        sessionId: _sessionId,
+        reliable: reliable,
+        fast: _FakeInputChannel(),
+      );
+      final active = sender.sendKeyboard(
+        action: KeyboardAction.KEYBOARD_ACTION_DOWN,
+        usbHidUsage: 0x04,
+      );
+      final queued = _inputResult(sender.sendText('cancelled'));
+      final close = sender.close();
+      expect(await queued, InputSenderErrorCode.cancelled);
+      gate.complete();
+      await active;
+      await close;
+      final events = reliable.sent
+          .map(decodeAndValidateReliableInputEnvelope)
+          .toList();
+      expect(events, hasLength(3));
+      expect(events[0].hasKeyboard(), isTrue);
+      expect(events[1].hasReleaseAllInput(), isTrue);
+      expect(events[2].hasSessionControl(), isTrue);
+      expect(events.map((event) => event.sequence.toInt()), <int>[1, 2, 3]);
+      expect(reliable.maximumConcurrentSends, 1);
+    },
+  );
+
   test('rejects values outside the Host input contract before send', () {
     final reliable = _FakeInputChannel();
     final fast = _FakeInputChannel();
@@ -421,5 +647,29 @@ final class _ManualFrameScheduler implements InputFrameScheduler {
     if (callback != null) {
       await callback();
     }
+  }
+}
+
+Future<InputSenderErrorCode?> _inputResult(Future<void> operation) =>
+    operation.then<InputSenderErrorCode?>(
+      (_) => null,
+      onError: (Object error) => (error as InputSenderException).code,
+    );
+
+final class _CachedNativeInputChannel extends _FakeInputChannel
+    implements RefreshableInputDataChannel {
+  _CachedNativeInputChannel({this.refreshGate})
+    : super(bufferedAmount: maxReliableBufferedAmount);
+
+  int nativeBufferedAmount = maxReliableBufferedAmount;
+  int readCount = 0;
+  final Completer<int>? refreshGate;
+
+  @override
+  Future<int> readBufferedAmount() async {
+    readCount++;
+    return refreshGate == null
+        ? nativeBufferedAmount
+        : await refreshGate!.future;
   }
 }

@@ -3,6 +3,7 @@
 package state
 
 import (
+	"container/heap"
 	"crypto/sha256"
 	"errors"
 	"strings"
@@ -46,6 +47,8 @@ type RendezvousStore struct {
 	codeIndex   map[[sha256.Size]byte]RendezvousID
 	memberIndex map[DeviceID]map[RendezvousID]struct{}
 	hostCounts  map[DeviceID]int
+	expirations rendezvousExpiryHeap
+	expiryIndex map[RendezvousID]*rendezvousExpiry
 	maxPerHost  int
 	maxTotal    int
 }
@@ -62,6 +65,7 @@ func NewRendezvousStore(maxPerHost int, maxTotal int) *RendezvousStore {
 		codeIndex:   make(map[[sha256.Size]byte]RendezvousID),
 		memberIndex: make(map[DeviceID]map[RendezvousID]struct{}),
 		hostCounts:  make(map[DeviceID]int),
+		expiryIndex: make(map[RendezvousID]*rendezvousExpiry),
 		maxPerHost:  maxPerHost,
 		maxTotal:    maxTotal,
 	}
@@ -109,6 +113,9 @@ func (store *RendezvousStore) Create(
 
 	stored := cloneRendezvous(rendezvous)
 	store.byID[stored.ID] = stored
+	expiry := &rendezvousExpiry{id: stored.ID, expiresAt: stored.ExpiresAt}
+	heap.Push(&store.expirations, expiry)
+	store.expiryIndex[stored.ID] = expiry
 	store.indexMemberLocked(stored.Host, stored.ID)
 	store.hostCounts[stored.Host]++
 	if stored.Kind == PairingKindDesktopCode {
@@ -210,10 +217,12 @@ func (store *RendezvousStore) Sweep(now time.Time) []Rendezvous {
 
 func (store *RendezvousStore) sweepLocked(now time.Time) []Rendezvous {
 	removed := make([]Rendezvous, 0)
-	for _, rendezvous := range store.byID {
-		if rendezvous.ExpiresAt.After(now) {
-			continue
+	for len(store.expirations) > 0 {
+		expiry := store.expirations[0]
+		if expiry.expiresAt.After(now) {
+			break
 		}
+		rendezvous := store.byID[expiry.id]
 		removed = append(removed, cloneRendezvous(rendezvous))
 		store.deleteLocked(rendezvous)
 	}
@@ -271,6 +280,8 @@ func (store *RendezvousStore) deleteLocked(rendezvous Rendezvous) {
 		return
 	}
 	delete(store.byID, stored.ID)
+	heap.Remove(&store.expirations, store.expiryIndex[stored.ID].index)
+	delete(store.expiryIndex, stored.ID)
 	store.removeMemberIndexLocked(stored.Host, stored.ID)
 	if stored.Controller != nil {
 		store.removeMemberIndexLocked(*stored.Controller, stored.ID)
@@ -284,6 +295,44 @@ func (store *RendezvousStore) deleteLocked(rendezvous Rendezvous) {
 	} else {
 		store.hostCounts[stored.Host] = remaining
 	}
+}
+
+// Every stored rendezvous owns exactly one indexed heap entry. Removing an
+// entry on completion or disconnect keeps this index bounded by live state,
+// even when rendezvous IDs are repeatedly reused before their original expiry.
+type rendezvousExpiry struct {
+	id        RendezvousID
+	expiresAt time.Time
+	index     int
+}
+
+type rendezvousExpiryHeap []*rendezvousExpiry
+
+func (expirations rendezvousExpiryHeap) Len() int { return len(expirations) }
+
+func (expirations rendezvousExpiryHeap) Less(left, right int) bool {
+	return expirations[left].expiresAt.Before(expirations[right].expiresAt)
+}
+
+func (expirations rendezvousExpiryHeap) Swap(left, right int) {
+	expirations[left], expirations[right] = expirations[right], expirations[left]
+	expirations[left].index = left
+	expirations[right].index = right
+}
+
+func (expirations *rendezvousExpiryHeap) Push(value any) {
+	expiry := value.(*rendezvousExpiry)
+	expiry.index = len(*expirations)
+	*expirations = append(*expirations, expiry)
+}
+
+func (expirations *rendezvousExpiryHeap) Pop() any {
+	last := len(*expirations) - 1
+	expiry := (*expirations)[last]
+	(*expirations)[last] = nil
+	*expirations = (*expirations)[:last]
+	expiry.index = -1
+	return expiry
 }
 
 func (store *RendezvousStore) indexMemberLocked(deviceID DeviceID, id RendezvousID) {

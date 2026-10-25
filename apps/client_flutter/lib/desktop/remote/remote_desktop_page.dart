@@ -442,7 +442,7 @@ final class _RemoteDesktopPageState extends State<RemoteDesktopPage>
     if (button == null) {
       return;
     }
-    unawaited(
+    _guardInput(
       sender.sendPointerButton(
         button: button,
         action: down
@@ -488,7 +488,7 @@ final class _RemoteDesktopPageState extends State<RemoteDesktopPage>
     if (action == null) {
       return;
     }
-    unawaited(
+    _guardInput(
       sender.sendKeyboard(
         action: action,
         usbHidUsage: usage,
@@ -548,9 +548,15 @@ final class _RemoteDesktopPageState extends State<RemoteDesktopPage>
 
   void _releaseAll() {
     _pressedButtonBits = 0;
-    unawaited(
+    _guardInput(
       widget.controller.inputSender?.releaseAll() ?? Future<void>.value(),
     );
+  }
+
+  void _guardInput(Future<void> operation) {
+    // Reliable channel errors notify the controller, which closes the session.
+    // Cancellation during focus loss or teardown is expected.
+    unawaited(operation.catchError((_) {}));
   }
 
   Future<void> _closeSession({required bool pop}) async {

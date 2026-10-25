@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::{fmt, path::PathBuf, sync::Arc, time::Duration};
+use std::{fmt, future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 #[cfg(any(target_os = "macos", windows))]
 use std::env;
@@ -13,7 +13,7 @@ use roammand_privileged_bridge::client::{
 use roammand_privileged_bridge::installed::{InstalledBridgeConfig, installed_file_sha256};
 use roammand_privileged_bridge::proxy::ProxyError;
 use tokio::{
-    sync::watch,
+    sync::{broadcast, watch},
     time::{MissedTickBehavior, interval, sleep, timeout},
 };
 use url::Url;
@@ -50,7 +50,9 @@ const MAX_ICE_SERVERS: usize = 8;
 const MAX_ICE_URLS_PER_SERVER: usize = 16;
 const MAX_ICE_URL_UTF8_BYTES: usize = 2_048;
 const MAX_ICE_CREDENTIAL_UTF8_BYTES: usize = 256;
-const SIGNALING_RECONNECT_DELAY: Duration = Duration::from_secs(2);
+const SIGNALING_RECONNECT_BASE_MS: u64 = 2_000;
+const SIGNALING_RECONNECT_MAX_MS: u64 = 30_000;
+const SIGNALING_STABLE_INTERVAL: Duration = Duration::from_secs(30);
 const SIGNALING_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const PEER_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const REMOTE_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -402,21 +404,79 @@ const fn map_bridge_probe_error(error: ProxyError) -> RuntimeError {
     }
 }
 
+#[derive(Default)]
+struct SignalingBackoff {
+    failures: u32,
+}
+
+impl SignalingBackoff {
+    fn next_delay(&mut self) -> Result<Duration, RuntimeError> {
+        let mut random = [0_u8; 8];
+        getrandom::fill(&mut random).map_err(|_| RuntimeError::RandomGeneration)?;
+        Ok(self.delay_with_sample(u64::from_le_bytes(random)))
+    }
+
+    fn delay_with_sample(&mut self, sample: u64) -> Duration {
+        let maximum = SIGNALING_RECONNECT_BASE_MS
+            .saturating_mul(1_u64 << self.failures.min(4))
+            .min(SIGNALING_RECONNECT_MAX_MS);
+        self.failures = self.failures.saturating_add(1);
+        let minimum = maximum / 2;
+        Duration::from_millis(minimum + sample % (maximum - minimum + 1))
+    }
+
+    fn reset(&mut self) {
+        self.failures = 0;
+    }
+}
+
+struct RemoteConnection {
+    transport: WebSocketSignalingTransport,
+    protocol: SignalingProtocol,
+    request_counter: u64,
+    generation: u64,
+}
+
 pub(crate) async fn run_remote_sessions(
     mut remote: PreparedRemote,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), RuntimeError> {
     let mut generation = 0_u64;
+    let mut backoff = SignalingBackoff::default();
+    let mut terminations = remote.coordinator.subscribe_session_terminations();
     while !*shutdown.borrow() {
         generation = generation.saturating_add(1);
-        let connection_result = run_remote_connection(
-            &remote.config,
+        let host_device_id = remote.coordinator.host_device_id().to_vec();
+        let connected = await_offline_operation(
+            Box::pin(connect_remote(&remote.config, &host_device_id, generation)),
             &mut remote.coordinator,
-            &remote.service,
-            generation,
+            &mut terminations,
             &mut shutdown,
         )
         .await;
+        let connection_result = match connected {
+            Ok(Some(mut connection)) => {
+                remote
+                    .service
+                    .pairing_signaling_connected()
+                    .map_err(|_| RuntimeError::RemoteSession)?;
+                let registered_at = tokio::time::Instant::now();
+                let result = run_registered_connection(
+                    &mut connection,
+                    &mut remote.coordinator,
+                    &remote.service,
+                    &mut terminations,
+                    &mut shutdown,
+                )
+                .await;
+                if registered_at.elapsed() >= SIGNALING_STABLE_INTERVAL {
+                    backoff.reset();
+                }
+                result
+            }
+            Ok(None) => break,
+            Err(error) => Err(error),
+        };
         if *shutdown.borrow() {
             break;
         }
@@ -424,21 +484,25 @@ pub(crate) async fn run_remote_sessions(
             log_remote_failure("signalingConnection", error);
         }
         if let Err(error) = remote.coordinator.signaling_lost(now_unix_ms()?) {
-            // The coordinator has already failed the affected session closed.
-            // Keep the Agent available for a fresh signaling connection.
             log_remote_failure("signalingLost", error);
         }
         remote
             .service
             .pairing_signaling_lost()
             .map_err(|_| RuntimeError::RemoteSession)?;
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    break;
-                }
-            }
-            () = sleep(SIGNALING_RECONNECT_DELAY) => {}
+        if await_offline_operation(
+            async {
+                sleep(backoff.next_delay()?).await;
+                Ok(())
+            },
+            &mut remote.coordinator,
+            &mut terminations,
+            &mut shutdown,
+        )
+        .await?
+        .is_none()
+        {
+            break;
         }
     }
     remote
@@ -451,30 +515,69 @@ pub(crate) async fn run_remote_sessions(
         .map_err(|_| RuntimeError::RemoteSession)
 }
 
-async fn run_remote_connection(
-    config: &RemoteRuntimeConfig,
+// Keep session expiry and trusted local stops live during backoff, DNS/TLS,
+// WebSocket registration, and a server that accepts but never responds.
+async fn await_offline_operation<F, T>(
+    operation: F,
     coordinator: &mut RemoteSessionCoordinator,
-    service: &Arc<HostService>,
-    generation: u64,
+    terminations: &mut broadcast::Receiver<roammand_protocol::roammand::v1::SessionTerminatedEvent>,
     shutdown: &mut watch::Receiver<bool>,
-) -> Result<(), RuntimeError> {
-    let connect = timeout(
+) -> Result<Option<T>, RuntimeError>
+where
+    F: Future<Output = Result<T, RuntimeError>>,
+{
+    tokio::pin!(operation);
+    loop {
+        if *shutdown.borrow() {
+            return Ok(None);
+        }
+        let deadline = coordinator.reconnect_deadline_unix_ms();
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() { return Ok(None); }
+            }
+            result = &mut operation => return result.map(Some),
+            () = wait_for_deadline(deadline) => {
+                coordinator.expire_active_reconnect(now_unix_ms()?.max(deadline.unwrap_or(0)))
+                    .map_err(|_| RuntimeError::RemoteSession)?;
+            }
+            termination = terminations.recv() => {
+                match termination {
+                    Ok(event) => {
+                        let _ = coordinator.handle_termination(&event, now_unix_ms()?)
+                            .map_err(|_| RuntimeError::RemoteSession)?;
+                    }
+                    Err(_) => return Err(RuntimeError::RemoteSession),
+                }
+            }
+        }
+    }
+}
+
+async fn wait_for_deadline(deadline: Option<u64>) {
+    match deadline {
+        Some(deadline) => {
+            let remaining = deadline.saturating_sub(now_unix_ms().unwrap_or(0));
+            sleep(Duration::from_millis(remaining)).await;
+        }
+        None => std::future::pending().await,
+    }
+}
+
+async fn connect_remote(
+    config: &RemoteRuntimeConfig,
+    host_device_id: &[u8],
+    generation: u64,
+) -> Result<RemoteConnection, RuntimeError> {
+    let mut transport = timeout(
         REMOTE_OPERATION_TIMEOUT,
         WebSocketSignalingTransport::connect(&config.endpoint),
-    );
-    let mut transport = tokio::select! {
-        changed = shutdown.changed() => {
-            if changed.is_err() || *shutdown.borrow() {
-                return Ok(());
-            }
-            return Err(RuntimeError::RemoteSession);
-        }
-        result = connect => result
-            .map_err(|_| RuntimeError::RemoteSession)?
-            .map_err(|_| RuntimeError::RemoteSession)?,
-    };
-    let mut protocol = SignalingProtocol::new(coordinator.host_device_id().to_vec())
-        .map_err(|_| RuntimeError::RemoteSession)?;
+    )
+    .await
+    .map_err(|_| RuntimeError::RemoteSession)?
+    .map_err(|_| RuntimeError::RemoteSession)?;
+    let mut protocol =
+        SignalingProtocol::new(host_device_id.to_vec()).map_err(|_| RuntimeError::RemoteSession)?;
     let mut request_counter = 0_u64;
     let registration_id = next_remote_request_id(generation, &mut request_counter);
     let registration = protocol
@@ -484,55 +587,47 @@ async fn run_remote_connection(
         .send(&registration)
         .await
         .map_err(|_| RuntimeError::RemoteSession)?;
-    let receive_registration = timeout(REMOTE_OPERATION_TIMEOUT, transport.receive_binary());
-    let registered = tokio::select! {
-        changed = shutdown.changed() => {
-            if changed.is_err() || *shutdown.borrow() {
-                let _ = transport.close().await;
-                return Ok(());
-            }
-            return Err(RuntimeError::RemoteSession);
-        }
-        result = receive_registration => result
-            .map_err(|_| RuntimeError::RemoteSession)?
-            .map_err(|_| RuntimeError::RemoteSession)?,
-    };
+    let registered = timeout(REMOTE_OPERATION_TIMEOUT, transport.receive_binary())
+        .await
+        .map_err(|_| RuntimeError::RemoteSession)?
+        .map_err(|_| RuntimeError::RemoteSession)?;
     if !matches!(
         protocol.handle_binary(&registered),
         Ok(SignalingEvent::Registered { .. })
     ) {
         return Err(RuntimeError::RemoteSession);
     }
-    service
-        .pairing_signaling_connected()
-        .map_err(|_| RuntimeError::RemoteSession)?;
-    run_registered_connection(
-        &mut transport,
-        &mut protocol,
-        coordinator,
-        service,
+    Ok(RemoteConnection {
+        transport,
+        protocol,
+        request_counter,
         generation,
-        &mut request_counter,
-        shutdown,
-    )
-    .await
+    })
 }
 
 async fn run_registered_connection(
-    transport: &mut WebSocketSignalingTransport,
-    protocol: &mut SignalingProtocol,
+    connection: &mut RemoteConnection,
     coordinator: &mut RemoteSessionCoordinator,
     service: &Arc<HostService>,
-    generation: u64,
-    request_counter: &mut u64,
+    terminations: &mut broadcast::Receiver<roammand_protocol::roammand::v1::SessionTerminatedEvent>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> Result<(), RuntimeError> {
+    let RemoteConnection {
+        transport,
+        protocol,
+        request_counter,
+        generation,
+    } = connection;
+    let generation = *generation;
     let mut heartbeat = interval(SIGNALING_HEARTBEAT_INTERVAL);
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut peer_poll = interval(PEER_EVENT_POLL_INTERVAL);
     peer_poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut terminations = coordinator.subscribe_session_terminations();
     loop {
+        let pairing_deadline = service
+            .pairing_deadline_unix_ms()
+            .map_err(|_| RuntimeError::RemoteSession)?;
+        let has_active_session = coordinator.has_active_session();
         tokio::select! {
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -543,14 +638,7 @@ async fn run_registered_connection(
             received = transport.receive_binary() => {
                 let encoded = received.map_err(|_| RuntimeError::RemoteSession)?;
                 let outbound = handle_remote_server_frame(protocol, coordinator, service, &encoded)?;
-                send_pairing_outbound(
-                    protocol,
-                    transport,
-                    service.poll_pairing_outbound(now_unix_ms()?)
-                        .map_err(|_| RuntimeError::RemoteSession)?,
-                    generation,
-                    request_counter,
-                ).await?;
+                flush_pairing(protocol, transport, service, generation, request_counter).await?;
                 send_remote_outbound(
                     protocol,
                     transport,
@@ -566,17 +654,15 @@ async fn run_registered_connection(
                     .map_err(|_| RuntimeError::RemoteSession)?;
                 transport.send(&frame).await.map_err(|_| RuntimeError::RemoteSession)?;
             }
-            _ = peer_poll.tick() => {
-                send_pairing_outbound(
-                    protocol,
-                    transport,
-                    service.poll_pairing_outbound(now_unix_ms()?)
-                        .map_err(|_| RuntimeError::RemoteSession)?,
-                    generation,
-                    request_counter,
-                ).await?;
+            () = service.pairing_activity() => {
+                flush_pairing(protocol, transport, service, generation, request_counter).await?;
+            }
+            () = wait_for_deadline(pairing_deadline) => {
+                flush_pairing(protocol, transport, service, generation, request_counter).await?;
+            }
+            _ = peer_poll.tick(), if has_active_session => {
                 let outbound = coordinator
-                    .poll_peer_event(now_unix_ms()?)
+                    .poll_peer_events(now_unix_ms()?)
                     .map_err(|error| {
                         log_remote_failure("pollPeerEvent", error);
                         RuntimeError::RemoteSession
@@ -670,6 +756,25 @@ fn handle_pairing_server_event(
 
 fn log_remote_failure(operation: &str, error: impl fmt::Debug) {
     eprintln!("[remote] host_operation={operation} cause={error:?}");
+}
+
+async fn flush_pairing(
+    protocol: &mut SignalingProtocol,
+    transport: &mut WebSocketSignalingTransport,
+    service: &HostService,
+    generation: u64,
+    request_counter: &mut u64,
+) -> Result<(), RuntimeError> {
+    send_pairing_outbound(
+        protocol,
+        transport,
+        service
+            .poll_pairing_outbound(now_unix_ms()?)
+            .map_err(|_| RuntimeError::RemoteSession)?,
+        generation,
+        request_counter,
+    )
+    .await
 }
 
 async fn send_pairing_outbound(
@@ -826,3 +931,6 @@ fn valid_ice_url(value: &str, schemes: &[&str]) -> bool {
     };
     schemes.contains(&parsed.scheme()) && !parsed.path().is_empty() && parsed.fragment().is_none()
 }
+
+#[cfg(test)]
+mod tests;

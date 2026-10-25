@@ -22,6 +22,18 @@ final class FlutterWebRtcPeerAdapter
   Object get renderer => _renderer;
 
   @override
+  int get reliableBufferedAmount => _reliable?.bufferedAmount ?? 0;
+
+  @override
+  Future<int> readReliableBufferedAmount() async {
+    final channel = _reliable;
+    if (_closed || channel == null) {
+      throw const PeerSessionException(PeerSessionErrorCode.closed);
+    }
+    return channel.getBufferedAmount();
+  }
+
+  @override
   int get fastBufferedAmount => _fast?.bufferedAmount ?? 0;
 
   @override
@@ -239,7 +251,13 @@ final class FlutterWebRtcPeerAdapter
   }
 
   @override
-  Future<void> sendReliable(Uint8List bytes) => _send(_reliable, bytes);
+  Future<void> sendReliable(Uint8List bytes) async {
+    final channel = _reliable;
+    await _send(channel, bytes);
+    // Native send completion only acknowledges enqueueing. Refresh the actual
+    // queue size before admitting the next reliable message.
+    await channel!.getBufferedAmount();
+  }
 
   @override
   Future<void> sendFast(Uint8List bytes) => _send(_fast, bytes);

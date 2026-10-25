@@ -2,8 +2,6 @@
 
 #![allow(unsafe_code)]
 
-use std::sync::mpsc::SyncSender;
-
 use core_graphics::display::CGDisplay;
 use cxx::UniquePtr;
 use webrtc_sys::desktop_capturer::{
@@ -11,7 +9,9 @@ use webrtc_sys::desktop_capturer::{
     ffi::{self as native_capture_ffi, new_desktop_capturer},
 };
 
-use super::{CaptureMessage, HostWebRtcError, OwnedDesktopFrame, required_frame_bytes};
+use super::{
+    CaptureMessage, CapturePublisher, CapturedVideoFrame, HostWebRtcError, required_frame_bytes,
+};
 
 pub(super) struct DesktopCaptureDriver {
     handle: UniquePtr<native_capture_ffi::DesktopCapturer>,
@@ -36,8 +36,8 @@ impl DesktopCaptureDriver {
         Ok(Self { handle })
     }
 
-    pub(super) fn start(&mut self, sender: SyncSender<CaptureMessage>) {
-        let callback = NativeCaptureCallback { sender };
+    pub(super) fn start(&mut self, publisher: CapturePublisher) {
+        let callback = NativeCaptureCallback { publisher };
         let wrapper = DesktopCapturerCallbackWrapper::new(Box::new(callback));
         self.handle.pin_mut().start(Box::new(wrapper));
     }
@@ -48,7 +48,7 @@ impl DesktopCaptureDriver {
 }
 
 struct NativeCaptureCallback {
-    sender: SyncSender<CaptureMessage>,
+    publisher: CapturePublisher,
 }
 
 impl DesktopCapturerCallback for NativeCaptureCallback {
@@ -56,21 +56,20 @@ impl DesktopCapturerCallback for NativeCaptureCallback {
         &mut self,
         result: Result<UniquePtr<native_capture_ffi::DesktopFrame>, NativeCaptureError>,
     ) {
-        let message = match result {
-            Ok(frame) => match frame.as_ref().map(copy_native_frame) {
+        self.publisher.publish(|| match result {
+            Ok(frame) => match frame.as_ref().map(convert_native_frame) {
                 Some(Ok(frame)) => CaptureMessage::Frame(frame),
                 Some(Err(_)) | None => CaptureMessage::InvalidFrame,
             },
             Err(NativeCaptureError::Temporary) => CaptureMessage::TemporaryError,
             Err(NativeCaptureError::Permanent) => CaptureMessage::PermanentError,
-        };
-        let _ = self.sender.try_send(message);
+        });
     }
 }
 
-fn copy_native_frame(
+fn convert_native_frame(
     frame: &native_capture_ffi::DesktopFrame,
-) -> Result<OwnedDesktopFrame, HostWebRtcError> {
+) -> Result<CapturedVideoFrame, HostWebRtcError> {
     let width = frame.width();
     let height = frame.height();
     let stride = u32::try_from(frame.stride()).map_err(|_| HostWebRtcError::PeerFailure)?;
@@ -82,5 +81,5 @@ fn copy_native_frame(
     // SAFETY: libwebrtc owns the buffer for the callback duration and a
     // successful DesktopFrame exposes stride * height readable bytes.
     let data = unsafe { std::slice::from_raw_parts(data, required) };
-    OwnedDesktopFrame::copy_from_parts(width, height, stride, data)
+    CapturedVideoFrame::from_argb(width, height, stride, data)
 }

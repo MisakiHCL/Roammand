@@ -18,7 +18,7 @@ use roammand_protocol::{
     },
 };
 use thiserror::Error;
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast};
 
 use crate::{
     AuthorizationError, AuthorizationRegistry, HostIdentity, HostPairingCoordinator, IdentityError,
@@ -53,6 +53,7 @@ pub struct HostService {
     privileged_bridge_generation: Mutex<u64>,
     pairing: Mutex<HostPairingCoordinator>,
     pairing_events: broadcast::Sender<HostPairingStatusSnapshot>,
+    pairing_activity: Notify,
     instance_id: [u8; 16],
     started_at_unix_ms: u64,
 }
@@ -77,6 +78,7 @@ impl HostService {
             privileged_bridge_generation: Mutex::new(0),
             pairing: Mutex::new(pairing),
             pairing_events,
+            pairing_activity: Notify::new(),
             instance_id,
             started_at_unix_ms,
         }
@@ -222,9 +224,9 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         pairing.signaling_lost();
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         Ok(())
     }
 
@@ -233,9 +235,9 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         pairing.shutdown();
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         Ok(())
     }
 
@@ -248,9 +250,9 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         let result = pairing.handle_signaling_event(event, &self.identity, now_unix_ms);
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         result
     }
 
@@ -262,9 +264,9 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         pairing.tick(now_unix_ms);
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         Ok(pairing.take_outbound())
     }
 
@@ -297,9 +299,9 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         let result = pairing.start(kind, signaling_endpoint, now_unix_ms);
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         result
     }
 
@@ -323,14 +325,14 @@ impl HostService {
             .authorization
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         let result = pairing.accept(
             rendezvous_id,
             controller_device_id,
             &mut authorization,
             now_unix_ms,
         );
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         result
     }
 
@@ -350,9 +352,9 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         let result = pairing.reject(rendezvous_id, controller_device_id, now_unix_ms);
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         result
     }
 
@@ -370,20 +372,30 @@ impl HostService {
             .pairing
             .lock()
             .map_err(|_| PairingCoordinatorError::InvalidState)?;
-        let previous_revision = pairing.snapshot().revision;
+        let previous_revision = pairing.revision();
         let result = pairing.cancel(rendezvous_id, now_unix_ms);
-        self.publish_pairing_snapshot(previous_revision, &pairing.snapshot());
+        self.publish_pairing_snapshot(previous_revision, &pairing);
         result
     }
 
-    fn publish_pairing_snapshot(
-        &self,
-        previous_revision: u64,
-        snapshot: &HostPairingStatusSnapshot,
-    ) {
-        if snapshot.revision != previous_revision {
-            let _ = self.pairing_events.send(snapshot.clone());
+    fn publish_pairing_snapshot(&self, previous_revision: u64, pairing: &HostPairingCoordinator) {
+        if pairing.revision() != previous_revision {
+            let _ = self.pairing_events.send(pairing.snapshot());
+            self.pairing_activity.notify_one();
+        } else if pairing.has_outbound() {
+            self.pairing_activity.notify_one();
         }
+    }
+
+    pub(crate) async fn pairing_activity(&self) {
+        self.pairing_activity.notified().await;
+    }
+
+    pub(crate) fn pairing_deadline_unix_ms(&self) -> Result<Option<u64>, PairingCoordinatorError> {
+        self.pairing
+            .lock()
+            .map(|pairing| pairing.deadline_unix_ms())
+            .map_err(|_| PairingCoordinatorError::InvalidState)
     }
 
     /// Creates a grant through an explicit current-user maintenance action.
@@ -654,10 +666,10 @@ impl HostService {
             }
             local_ipc_client_frame::Payload::GetHostPairingStatus(_) => {
                 let mut pairing = self.pairing.lock().map_err(|_| ServiceError::Internal)?;
-                let previous_revision = pairing.snapshot().revision;
+                let previous_revision = pairing.revision();
                 pairing.tick(now_unix_ms);
                 let status = pairing.snapshot();
-                self.publish_pairing_snapshot(previous_revision, &status);
+                self.publish_pairing_snapshot(previous_revision, &pairing);
                 Ok(local_ipc_server_frame::Payload::HostPairingStatus(status))
             }
             local_ipc_client_frame::Payload::AcceptHostPairing(request) => {

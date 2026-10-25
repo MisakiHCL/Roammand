@@ -481,6 +481,7 @@ final class RemoteDesktopController extends ChangeNotifier
         sessionId: offer.sessionId,
         reliable: _peer.reliableInput,
         fast: _peer.fastInput,
+        onReliableFailure: () => unawaited(_fail(RemoteDesktopErrorCode.peer)),
       );
       _answer = null;
       _reconnect = null;

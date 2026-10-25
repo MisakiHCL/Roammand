@@ -158,6 +158,10 @@ final class ControllerPeerCallbacks {
 abstract interface class ControllerPeerAdapter {
   Object get renderer;
 
+  int get reliableBufferedAmount;
+
+  Future<int> readReliableBufferedAmount();
+
   int get fastBufferedAmount;
 
   Future<ControllerPeerOffer> initialize(
@@ -439,14 +443,20 @@ final class ControllerPeerSession {
   }
 }
 
-final class _PeerInputChannel implements InputDataChannel {
+final class _PeerInputChannel implements RefreshableInputDataChannel {
   const _PeerInputChannel(this._adapter, this._reliable);
 
   final ControllerPeerAdapter _adapter;
   final bool _reliable;
 
   @override
-  int get bufferedAmount => _reliable ? 0 : _adapter.fastBufferedAmount;
+  int get bufferedAmount =>
+      _reliable ? _adapter.reliableBufferedAmount : _adapter.fastBufferedAmount;
+
+  @override
+  Future<int> readBufferedAmount() => _reliable
+      ? _adapter.readReliableBufferedAmount()
+      : Future<int>.value(_adapter.fastBufferedAmount);
 
   @override
   Future<void> send(Uint8List bytes) =>

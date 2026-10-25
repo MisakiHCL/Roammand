@@ -331,6 +331,254 @@ func TestRendezvousCreateReusesAnExpiredDesktopCode(t *testing.T) {
 	}
 }
 
+func TestRendezvousExpiryIndexHandlesMixedDeadlinesAndRemoval(t *testing.T) {
+	store := newTestRendezvousStore(testMaxRendezvousPerHost)
+	now := time.Unix(100, 0)
+	deadlines := []time.Duration{5, 1, 3, 1, 5, 2, 4, 1}
+	controller := testDeviceID(100)
+	for index, seconds := range deadlines {
+		seed := byte(index + 1)
+		if _, err := store.Create(Rendezvous{
+			ID:        testRendezvousID(seed),
+			Kind:      PairingKindDesktopCode,
+			Host:      testDeviceID(seed),
+			ExpiresAt: now.Add(seconds * time.Second),
+		}, "AAAAAAA"+string(rune('A'+index)), now); err != nil {
+			t.Fatal(err)
+		}
+		if index == 5 || index == 6 {
+			if _, err := store.JoinByID(testRendezvousID(seed), controller, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertRendezvousIndexes(t, store)
+	}
+	// Remove both an earliest deadline and an interior heap entry, followed by
+	// multiple entries owned by a controller with different deadlines.
+	for _, seed := range []byte{2, 3} {
+		if _, err := store.Complete(testRendezvousID(seed), testDeviceID(seed), now); err != nil {
+			t.Fatal(err)
+		}
+		assertRendezvousIndexes(t, store)
+	}
+	if removed := store.RemoveForDevice(controller); len(removed) != 2 {
+		t.Fatalf("disconnect removed %d rendezvous, want 2", len(removed))
+	}
+	assertRendezvousIndexes(t, store)
+
+	assertRemovedIDs := func(at time.Time, seeds ...byte) {
+		t.Helper()
+		removed := store.Sweep(at)
+		wanted := make(map[RendezvousID]bool, len(seeds))
+		for _, seed := range seeds {
+			wanted[testRendezvousID(seed)] = true
+		}
+		if len(removed) != len(wanted) {
+			t.Fatalf("removed at %v = %+v, want seeds %v", at, removed, seeds)
+		}
+		for _, rendezvous := range removed {
+			if !wanted[rendezvous.ID] {
+				t.Fatalf("unexpected or duplicate expired rendezvous: %+v", rendezvous)
+			}
+			delete(wanted, rendezvous.ID)
+		}
+		assertRendezvousIndexes(t, store)
+	}
+	assertRemovedIDs(now.Add(time.Second), 4, 8)
+	assertRemovedIDs(now.Add(4 * time.Second))
+	assertRemovedIDs(now.Add(5*time.Second), 1, 5)
+	assertRemovedIDs(now.Add(time.Hour))
+}
+
+func TestRendezvousIDReuseDoesNotInheritRemovedExpiry(t *testing.T) {
+	for _, remove := range []string{"complete", "disconnect", "expire"} {
+		t.Run(remove, func(t *testing.T) {
+			store := NewRendezvousStore(1, 1)
+			now := time.Unix(100, 0)
+			host := testDeviceID(1)
+			id := testRendezvousID(1)
+			oldExpiry := now.Add(time.Minute)
+			if _, err := store.Create(Rendezvous{
+				ID: id, Kind: PairingKindDesktopCode, Host: host, ExpiresAt: oldExpiry,
+			}, "ABCDEFGH", now); err != nil {
+				t.Fatal(err)
+			}
+			createAt := now
+			switch remove {
+			case "complete":
+				if _, err := store.Complete(id, host, now); err != nil {
+					t.Fatal(err)
+				}
+			case "disconnect":
+				if removed := store.RemoveForDevice(host); len(removed) != 1 {
+					t.Fatalf("disconnect removed %d rendezvous, want 1", len(removed))
+				}
+			case "expire":
+				// Create itself must free both the full global and host capacity,
+				// as well as the old ID and pairing code, without a separate sweep.
+				createAt = oldExpiry
+			}
+			removed, err := store.Create(Rendezvous{
+				ID: id, Kind: PairingKindDesktopCode, Host: host,
+				ExpiresAt: oldExpiry.Add(time.Minute),
+			}, "ABCDEFGH", createAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (remove == "expire" && len(removed) != 1) || (remove != "expire" && len(removed) != 0) {
+				t.Fatalf("Create removed %d rendezvous after %s", len(removed), remove)
+			}
+			assertRendezvousIndexes(t, store)
+			if removed := store.Sweep(oldExpiry); len(removed) != 0 || store.Len() != 1 {
+				t.Fatalf("old expiry removed replacement: removed=%+v remaining=%d", removed, store.Len())
+			}
+			if _, err := store.JoinByCode("ABCDEFGH", testDeviceID(2), oldExpiry); err != nil {
+				t.Fatalf("replacement pairing code unavailable: %v", err)
+			}
+			assertRendezvousIndexes(t, store)
+			if removed := store.Sweep(oldExpiry.Add(time.Minute)); len(removed) != 1 || removed[0].Controller == nil {
+				t.Fatalf("replacement expiration lost notification state: %+v", removed)
+			}
+			assertRendezvousIndexes(t, store)
+		})
+	}
+}
+
+func TestRendezvousCreateFailureStillReturnsExpiredNotifications(t *testing.T) {
+	store := NewRendezvousStore(1, 2)
+	now := time.Unix(100, 0)
+	old := Rendezvous{
+		ID: testRendezvousID(1), Kind: PairingKindDesktopCode,
+		Host: testDeviceID(1), ExpiresAt: now.Add(time.Second),
+	}
+	active := Rendezvous{
+		ID: testRendezvousID(2), Kind: PairingKindQR,
+		Host: testDeviceID(2), ExpiresAt: now.Add(time.Minute),
+	}
+	if _, err := store.Create(old, "ABCDEFGH", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.JoinByID(old.ID, testDeviceID(3), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(active, "", now); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := store.Create(active, "", old.ExpiresAt)
+	if !errors.Is(err, ErrRendezvousExists) || len(removed) != 1 || removed[0].ID != old.ID || removed[0].Controller == nil {
+		t.Fatalf("duplicate create error=%v removed=%+v, want expiry notification", err, removed)
+	}
+	assertRendezvousIndexes(t, store)
+	if _, err := store.JoinByCode("ABCDEFGH", testDeviceID(4), old.ExpiresAt); !errors.Is(err, ErrRendezvousNotFound) {
+		t.Fatalf("expired code remained indexed: %v", err)
+	}
+	old.ExpiresAt = now.Add(time.Minute)
+	if _, err := store.Create(old, "ABCDEFGH", now.Add(time.Second)); err != nil {
+		t.Fatalf("expired capacity or code was not released: %v", err)
+	}
+	assertRendezvousIndexes(t, store)
+}
+
+func TestRendezvousExpiryIndexStaysBoundedDuringChurn(t *testing.T) {
+	store := NewRendezvousStore(1, 2)
+	now := time.Unix(100, 0)
+	anchor := Rendezvous{
+		ID: testRendezvousID(1), Kind: PairingKindQR,
+		Host: testDeviceID(1), ExpiresAt: now.Add(time.Hour),
+	}
+	if _, err := store.Create(anchor, "", now); err != nil {
+		t.Fatal(err)
+	}
+	for iteration := 0; iteration < 1_000; iteration++ {
+		rendezvous := Rendezvous{
+			ID: testRendezvousID(2), Kind: PairingKindQR,
+			Host: testDeviceID(2), ExpiresAt: now.Add(time.Duration(iteration+1) * time.Minute),
+		}
+		if _, err := store.Create(rendezvous, "", now); err != nil {
+			t.Fatal(err)
+		}
+		assertRendezvousIndexes(t, store)
+		if iteration%2 == 0 {
+			if _, err := store.Complete(rendezvous.ID, rendezvous.Host, now); err != nil {
+				t.Fatal(err)
+			}
+		} else if removed := store.RemoveForDevice(rendezvous.Host); len(removed) != 1 {
+			t.Fatalf("disconnect removed %d rendezvous, want 1", len(removed))
+		}
+		assertRendezvousIndexes(t, store)
+		if cap(store.expirations) > store.maxTotal {
+			t.Fatalf("expiry storage grew beyond peak live entries: capacity=%d", cap(store.expirations))
+		}
+	}
+	if removed := store.Sweep(anchor.ExpiresAt); len(removed) != 1 || removed[0].ID != anchor.ID {
+		t.Fatalf("churn left stale expirations: %+v", removed)
+	}
+	assertRendezvousIndexes(t, store)
+}
+
+func assertRendezvousIndexes(t *testing.T, store *RendezvousStore) {
+	t.Helper()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	if len(store.expirations) != len(store.byID) || len(store.expiryIndex) != len(store.byID) {
+		t.Fatalf("index sizes: expirations=%d expiryIndex=%d byID=%d", len(store.expirations), len(store.expiryIndex), len(store.byID))
+	}
+	for index, expiry := range store.expirations {
+		rendezvous, exists := store.byID[expiry.id]
+		if !exists || expiry.index != index || store.expiryIndex[expiry.id] != expiry || !expiry.expiresAt.Equal(rendezvous.ExpiresAt) {
+			t.Fatalf("inconsistent expiry entry at %d: %+v", index, expiry)
+		}
+		if index > 0 && expiry.expiresAt.Before(store.expirations[(index-1)/2].expiresAt) {
+			t.Fatalf("earlier deadline below its parent at index %d", index)
+		}
+	}
+	// Removed heap slots must release their pointers even when the backing
+	// allocation is reused by future requests.
+	for _, expiry := range store.expirations[len(store.expirations):cap(store.expirations)] {
+		if expiry != nil {
+			t.Fatalf("removed expiry retained in backing storage: %+v", expiry)
+		}
+	}
+	counts := make(map[DeviceID]int)
+	codeCount := 0
+	for id, rendezvous := range store.byID {
+		counts[rendezvous.Host]++
+		if _, exists := store.memberIndex[rendezvous.Host][id]; !exists {
+			t.Fatalf("host member index missing rendezvous %v", id)
+		}
+		if rendezvous.Controller != nil {
+			if _, exists := store.memberIndex[*rendezvous.Controller][id]; !exists {
+				t.Fatalf("controller member index missing rendezvous %v", id)
+			}
+		}
+		if rendezvous.Kind == PairingKindDesktopCode {
+			codeCount++
+			if store.codeIndex[rendezvous.CodeHash] != id {
+				t.Fatalf("pairing code index missing rendezvous %v", id)
+			}
+		}
+	}
+	if len(store.hostCounts) != len(counts) || len(store.codeIndex) != codeCount {
+		t.Fatalf("stale count/code indexes: hostCounts=%v codeIndex=%v", store.hostCounts, store.codeIndex)
+	}
+	for host, count := range counts {
+		if store.hostCounts[host] != count {
+			t.Fatalf("host %v count=%d, want %d", host, store.hostCounts[host], count)
+		}
+	}
+	for member, ids := range store.memberIndex {
+		if len(ids) == 0 {
+			t.Fatalf("empty member index retained for %v", member)
+		}
+		for id := range ids {
+			rendezvous, exists := store.byID[id]
+			if !exists || (rendezvous.Host != member && (rendezvous.Controller == nil || *rendezvous.Controller != member)) {
+				t.Fatalf("stale member index for %v: %v", member, id)
+			}
+		}
+	}
+}
+
 func testRendezvousID(seed byte) RendezvousID {
 	var id RendezvousID
 	for index := range id {
