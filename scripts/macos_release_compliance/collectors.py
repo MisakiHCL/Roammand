@@ -586,9 +586,14 @@ def dart_components(
         if checksum and not re.fullmatch(r"[0-9a-fA-F]{64}", checksum):
             raise fail(f"Dart package {name} has an invalid checksum")
         if repository_relative is not None:
+            source_root = normalized_url(arguments.source_url.rstrip("/"))
+            # Staging supplies checkout URLs; repository-only callers need a revision.
+            if "/tree/" not in urllib.parse.urlparse(source_root).path:
+                source_root += (
+                    f"/tree/{urllib.parse.quote(arguments.source_revision, safe='')}"
+                )
             source_url = (
-                f"{normalized_url(arguments.source_url).rstrip('/')}/tree/"
-                f"{urllib.parse.quote(arguments.source_revision, safe='')}/"
+                f"{source_root}/"
                 f"{urllib.parse.quote(repository_relative.as_posix(), safe='/')}"
             )
             ecosystem = "pub-path"

@@ -527,13 +527,15 @@ generate_compliance() {
   local pod_acknowledgements="$5"
   local bip39_notice="$6"
   local native_webrtc_manifest="$7"
+  local source_url="${8:-$SOURCE_URL}"
+  local source_revision="${9:-$SOURCE_REVISION}"
 
   SOURCE_DATE_EPOCH="$FIXED_SOURCE_DATE_EPOCH" LC_ALL=C TZ=UTC \
     python3 "$GENERATOR" \
       --package-dir "$PACKAGE_DIR" \
       --output-dir "$output_dir" \
-      --source-revision "$SOURCE_REVISION" \
-      --source-url "$SOURCE_URL" \
+      --source-revision "$source_revision" \
+      --source-url "$source_url" \
       --copyright-holder "$COPYRIGHT_HOLDER" \
       --cargo-metadata "$cargo_metadata" \
       --cargo-lock "$INPUT_DIR/Cargo.lock" \
@@ -801,6 +803,45 @@ generate_compliance \
 require_output_set "$OUTPUT_ONE"
 require_output_set "$OUTPUT_TWO"
 assert_spdx_contract "$OUTPUT_ONE/SBOM.spdx.json"
+
+readonly CURRENT_SOURCE_REVISION="$(git -C "$ROOT_DIR" rev-parse --verify 'HEAD^{commit}')"
+for checkout_ref in "$CURRENT_SOURCE_REVISION" "v1.1.0"; do
+  checkout_source_url="https://github.com/MisakiHCL/roammand/tree/$checkout_ref"
+  checkout_output="$TEMP_DIR/output-checkout-$checkout_ref"
+  generate_compliance \
+    "$checkout_output" \
+    "$INPUT_DIR/cargo-metadata.json" \
+    "$INPUT_DIR/pubspec.lock" \
+    "$INPUT_DIR/package_config.json" \
+    "$INPUT_DIR/Pods-Runner-acknowledgements.markdown" \
+    "$INPUT_DIR/bip39-NOTICE.md" \
+    "$INPUT_DIR/libwebrtc-assets.sha256" \
+    "$checkout_source_url" \
+    "$CURRENT_SOURCE_REVISION" >/dev/null
+  require_output_set "$checkout_output"
+  python3 - "$checkout_output" "$checkout_source_url" "$CURRENT_SOURCE_REVISION" <<'PY'
+import json
+import pathlib
+import sys
+
+output = pathlib.Path(sys.argv[1])
+source_url = sys.argv[2]
+source_revision = sys.argv[3]
+expected_path_source = f"{source_url}/third_party/flutter_webrtc"
+document = json.loads((output / "SBOM.spdx.json").read_text(encoding="utf-8"))
+path_package = next(
+    package for package in document["packages"]
+    if package["name"] == "flutter_webrtc"
+    and "Repository-local modified Dart path dependency" in package.get("summary", "")
+)
+assert path_package["sourceInfo"] == expected_path_source
+for name in ("SBOM.spdx.json", "THIRD_PARTY_NOTICES.md", "SOURCE_CODE.md"):
+    content = (output / name).read_text(encoding="utf-8")
+    assert expected_path_source in content, f"{name} omits the checkout dependency URL"
+    assert f"{source_url}/tree/" not in content, f"{name} repeats the checkout path"
+    assert source_revision in content, f"{name} omits the immutable source revision"
+PY
+done
 
 if [[ -n "${ROAMMAND_SPDX_TOOLS_PYTHON:-}" ]]; then
   "$ROAMMAND_SPDX_TOOLS_PYTHON" \

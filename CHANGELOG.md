@@ -29,6 +29,8 @@ notarized by Apple.
 
 ### Fixed
 
+- Corrected repository-local dependency source links in macOS release
+  compliance records.
 - Aligned CocoaPods build targets with the app's existing macOS 14.4 minimum
   for newer Xcode releases.
 - Verified Universal macOS binary architectures individually so `lipo` versions
