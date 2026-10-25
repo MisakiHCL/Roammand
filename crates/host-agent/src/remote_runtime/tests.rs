@@ -131,17 +131,79 @@ fn signaling_backoff_grows_is_bounded_and_resets() {
     let mut high = SignalingBackoff::default();
     for maximum in [2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000] {
         let minimum = maximum / 2;
-        assert_eq!(low.delay_with_sample(0), Duration::from_millis(minimum));
         assert_eq!(
-            high.delay_with_sample(maximum - minimum),
+            low.delay_with_sample(0, false),
+            Duration::from_millis(minimum)
+        );
+        assert_eq!(
+            high.delay_with_sample(maximum - minimum, false),
             Duration::from_millis(maximum)
         );
     }
     high.reset();
-    assert_eq!(high.delay_with_sample(0), Duration::from_secs(1));
+    assert_eq!(high.delay_with_sample(0, false), Duration::from_secs(1));
     assert_ne!(
-        SignalingBackoff::default().delay_with_sample(1),
-        SignalingBackoff::default().delay_with_sample(999)
+        SignalingBackoff::default().delay_with_sample(1, false),
+        SignalingBackoff::default().delay_with_sample(999, false)
+    );
+}
+
+#[test]
+fn retained_session_retry_leaves_a_controller_offer_after_registration() {
+    // The Controller sends at 1, 3, 7, 15, and 23 seconds. Its separate tests
+    // enforce that schedule; offers sent while the Host is offline are lost.
+    let controller_offers = [1, 3, 7, 15, 23].map(Duration::from_secs);
+    let ActiveFixture {
+        mut coordinator, ..
+    } = active_coordinator(None, VecDeque::new());
+    // Registration was successful only briefly, so prior idle failures remain.
+    let mut backoff = SignalingBackoff { failures: 4 };
+    coordinator.signaling_lost(now_unix_ms().unwrap()).unwrap();
+    let delay = backoff.delay_with_sample(10_000, coordinator.has_active_session());
+    for registration_time in [Duration::ZERO, REMOTE_OPERATION_TIMEOUT * 3] {
+        let registered_at = delay + registration_time;
+        let next_offer = controller_offers
+            .into_iter()
+            .find(|offer| *offer >= registered_at);
+        assert!(
+            next_offer.is_some(),
+            "Host must re-register before the Controller has exhausted its offers"
+        );
+    }
+}
+
+#[test]
+fn retained_session_caps_each_retry_without_resetting_idle_backoff() {
+    let now = now_unix_ms().unwrap();
+    let ActiveFixture {
+        mut coordinator,
+        closed,
+        ..
+    } = active_coordinator(Some(now + 45_000), VecDeque::new());
+    let mut backoff = SignalingBackoff::default();
+    for _ in 0..5 {
+        backoff.delay_with_sample(0, false);
+    }
+    for _ in 0..10 {
+        assert_eq!(
+            backoff.delay_with_sample(0, coordinator.has_active_session()),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            backoff.delay_with_sample(1_000, coordinator.has_active_session()),
+            Duration::from_secs(2)
+        );
+    }
+    coordinator.expire_active_reconnect(now + 45_000).unwrap();
+    assert!(*closed.lock().unwrap());
+    assert_eq!(
+        backoff.delay_with_sample(15_000, coordinator.has_active_session()),
+        Duration::from_secs(30)
+    );
+    backoff.reset();
+    assert_eq!(
+        backoff.delay_with_sample(1_000, coordinator.has_active_session()),
+        Duration::from_secs(2)
     );
 }
 

@@ -9,6 +9,61 @@ import 'package:roammand/mobile/remote/mobile_keyboard_controller.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
 void main() {
+  test(
+    'publishes modifier changes asynchronously and closes after clearing',
+    () async {
+      final fixture = _KeyboardFixture();
+      final states = <Set<MobileModifierKey>>[];
+      final done = Completer<void>();
+      final subscription = fixture.controller.modifierChanges.listen(
+        (_) => states.add(
+          Set<MobileModifierKey>.of(fixture.controller.activeModifiers),
+        ),
+        onDone: done.complete,
+      );
+
+      final first = fixture.controller.setModifier(
+        MobileModifierKey.control,
+        true,
+      );
+      expect(states, isEmpty);
+      await first;
+      await fixture.controller.setModifier(MobileModifierKey.control, true);
+      expect(states, <Set<MobileModifierKey>>[
+        <MobileModifierKey>{MobileModifierKey.control},
+      ]);
+      await fixture.controller.setModifier(MobileModifierKey.control, false);
+      await fixture.controller.setModifier(MobileModifierKey.shift, true);
+      await fixture.controller.releaseAll();
+      await fixture.controller.setModifier(MobileModifierKey.alt, true);
+      await fixture.controller.close();
+      await done.future;
+
+      expect(states, <Set<MobileModifierKey>>[
+        <MobileModifierKey>{MobileModifierKey.control},
+        <MobileModifierKey>{},
+        <MobileModifierKey>{MobileModifierKey.shift},
+        <MobileModifierKey>{},
+        <MobileModifierKey>{MobileModifierKey.alt},
+        <MobileModifierKey>{},
+      ]);
+      await subscription.cancel();
+    },
+  );
+
+  test('a paused modifier listener does not delay input cleanup', () async {
+    final fixture = _KeyboardFixture();
+    final subscription = fixture.controller.modifierChanges.listen((_) {});
+    subscription.pause();
+    await fixture.controller.setModifier(MobileModifierKey.control, true);
+
+    await fixture.controller.close();
+
+    expect(fixture.controller.activeModifiers, isEmpty);
+    expect(fixture.reliable.decoded.last.hasReleaseAllInput(), isTrue);
+    await subscription.cancel();
+  });
+
   test('toggles every supported modifier with exact HID bits', () async {
     final fixture = _KeyboardFixture();
 
@@ -161,6 +216,11 @@ void main() {
         onReliableFailure: () => failures++,
       );
       final controller = MobileKeyboardController(sender);
+      final states = <Set<MobileModifierKey>>[];
+      final subscription = controller.modifierChanges.listen(
+        (_) =>
+            states.add(Set<MobileModifierKey>.of(controller.activeModifiers)),
+      );
       final modifier = controller.setModifier(MobileModifierKey.control, true);
       reliable.completeNext();
       await modifier;
@@ -182,6 +242,10 @@ void main() {
       expect(await special, InputSenderErrorCode.cancelled);
       expect(failures, 0);
       expect(controller.activeModifiers, isEmpty);
+      expect(states, <Set<MobileModifierKey>>[
+        <MobileModifierKey>{MobileModifierKey.control},
+        <MobileModifierKey>{},
+      ]);
       reliable.completeNext();
       expect(await pointer, isNull);
       await Future<void>.delayed(Duration.zero);
@@ -200,6 +264,7 @@ void main() {
       final close = controller.close();
       reliable.completeNext();
       await close;
+      await subscription.cancel();
     },
   );
 

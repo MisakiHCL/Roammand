@@ -49,6 +49,8 @@ final class MobileKeyboardController {
 
   final RemoteInputSender _sender;
   final Set<MobileModifierKey> _activeModifiers = <MobileModifierKey>{};
+  final StreamController<void> _modifierChanges =
+      StreamController<void>.broadcast();
 
   final Duration operationTimeout;
   final Queue<_KeyboardOperation> _pending = Queue<_KeyboardOperation>();
@@ -61,6 +63,10 @@ final class MobileKeyboardController {
 
   Set<MobileModifierKey> get activeModifiers =>
       UnmodifiableSetView<MobileModifierKey>(_activeModifiers);
+
+  // Async delivery lets session teardown clear modifiers during a widget frame.
+  // Terminal cleanup closes the stream after delivering its final state change.
+  Stream<void> get modifierChanges => _modifierChanges.stream;
 
   bool isModifierActive(MobileModifierKey modifier) =>
       _activeModifiers.contains(modifier);
@@ -75,6 +81,7 @@ final class MobileKeyboardController {
     if (!changed) {
       return _lastOperation;
     }
+    _modifierChanges.add(null);
     final usage = _modifierUsages[modifier]!;
     final bits = _currentModifierBits();
     return _enqueue(
@@ -128,7 +135,7 @@ final class MobileKeyboardController {
   Future<void> releaseAll() {
     if (_closed) return _closeFuture ?? Future<void>.value();
     _cancelOperations(InputSenderErrorCode.cancelled);
-    _activeModifiers.clear();
+    _clearModifiers();
     return _enqueue(_sender.releaseAll);
   }
 
@@ -137,7 +144,8 @@ final class MobileKeyboardController {
     if (existing != null) return existing;
     _closed = true;
     _cancelOperations(InputSenderErrorCode.cancelled);
-    _activeModifiers.clear();
+    _clearModifiers();
+    unawaited(_modifierChanges.close());
     // The sender serializes release behind any call already submitted to the
     // native channel and applies its own bounded send deadline.
     return _closeFuture = _sender.releaseAll().catchError((_) {});
@@ -189,7 +197,7 @@ final class MobileKeyboardController {
               error.code == InputSenderErrorCode.cancelled) {
             // Gestures share the sender and can release input directly. Their
             // release cancels queued keyboard work without failing the peer.
-            _activeModifiers.clear();
+            _clearModifiers();
             _cancelOperations(InputSenderErrorCode.cancelled);
             return;
           }
@@ -206,9 +214,16 @@ final class MobileKeyboardController {
   void _abort() {
     if (_closed) return;
     _closed = true;
-    _activeModifiers.clear();
+    _clearModifiers();
+    unawaited(_modifierChanges.close());
     _cancelOperations(InputSenderErrorCode.channel);
     _sender.abort();
+  }
+
+  void _clearModifiers() {
+    if (_activeModifiers.isEmpty) return;
+    _activeModifiers.clear();
+    _modifierChanges.add(null);
   }
 
   void _cancelOperations(InputSenderErrorCode code) {

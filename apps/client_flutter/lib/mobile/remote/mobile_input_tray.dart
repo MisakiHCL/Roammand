@@ -38,9 +38,35 @@ final class MobileInputTray extends StatefulWidget {
 
 final class _MobileInputTrayState extends State<MobileInputTray> {
   final TextEditingController _textController = TextEditingController();
+  StreamSubscription<void>? _modifierSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenToModifiers();
+  }
+
+  @override
+  void didUpdateWidget(covariant MobileInputTray oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller)) {
+      unawaited(_modifierSubscription?.cancel());
+      _listenToModifiers();
+    }
+  }
+
+  void _listenToModifiers() {
+    final controller = widget.controller;
+    _modifierSubscription = controller?.modifierChanges.listen((_) {
+      if (mounted && identical(controller, widget.controller)) {
+        setState(() {});
+      }
+    });
+  }
 
   @override
   void dispose() {
+    unawaited(_modifierSubscription?.cancel());
     _textController.dispose();
     super.dispose();
   }
@@ -179,7 +205,6 @@ final class _MobileInputTrayState extends State<MobileInputTray> {
       onSelected: widget.enabled && controller != null
           ? (active) {
               final operation = controller.setModifier(modifier, active);
-              setState(() {});
               _guard(operation);
             }
           : null,

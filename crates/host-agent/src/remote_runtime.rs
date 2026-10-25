@@ -410,16 +410,24 @@ struct SignalingBackoff {
 }
 
 impl SignalingBackoff {
-    fn next_delay(&mut self) -> Result<Duration, RuntimeError> {
+    fn next_delay(&mut self, retained_session: bool) -> Result<Duration, RuntimeError> {
         let mut random = [0_u8; 8];
         getrandom::fill(&mut random).map_err(|_| RuntimeError::RandomGeneration)?;
-        Ok(self.delay_with_sample(u64::from_le_bytes(random)))
+        Ok(self.delay_with_sample(u64::from_le_bytes(random), retained_session))
     }
 
-    fn delay_with_sample(&mut self, sample: u64) -> Duration {
+    fn delay_with_sample(&mut self, sample: u64, retained_session: bool) -> Duration {
+        // A retained session must re-register in time for the Controller's
+        // bounded offer schedule, even after a long earlier service outage.
+        // Idle Hosts retain exponential backoff to spread reconnect load.
+        let limit = if retained_session {
+            SIGNALING_RECONNECT_BASE_MS
+        } else {
+            SIGNALING_RECONNECT_MAX_MS
+        };
         let maximum = SIGNALING_RECONNECT_BASE_MS
             .saturating_mul(1_u64 << self.failures.min(4))
-            .min(SIGNALING_RECONNECT_MAX_MS);
+            .min(limit);
         self.failures = self.failures.saturating_add(1);
         let minimum = maximum / 2;
         Duration::from_millis(minimum + sample % (maximum - minimum + 1))
@@ -490,9 +498,10 @@ pub(crate) async fn run_remote_sessions(
             .service
             .pairing_signaling_lost()
             .map_err(|_| RuntimeError::RemoteSession)?;
+        let reconnect_delay = backoff.next_delay(remote.coordinator.has_active_session())?;
         if await_offline_operation(
             async {
-                sleep(backoff.next_delay()?).await;
+                sleep(reconnect_delay).await;
                 Ok(())
             },
             &mut remote.coordinator,

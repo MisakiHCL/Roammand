@@ -22,6 +22,11 @@ and released versions follow semantic versioning.
 
 ### Fixed
 
+- Kept signaling retry delays short while retaining an active session, even
+  after earlier connection failures, so a brief outage does not miss all
+  Controller recovery offers.
+- Refreshed mobile modifier buttons when cancellation, input release, or close
+  clears their pressed state asynchronously.
 - Kept retained-session expiry and local Stop active while Host signaling is
   reconnecting, including during connection attempts and retry delays.
 - Prevented gesture-triggered keyboard cancellation from being treated as a
