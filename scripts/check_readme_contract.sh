@@ -78,7 +78,9 @@ for expected in \
   '[简体中文](README.zh-CN.md)' \
   'Leave the desk. Keep work moving.' \
   '## What you can do' \
-  '## How it works' \
+  '## Platform support and downloads' \
+  '## Quick start' \
+  '## Current limits' \
   '## Start from source' \
   '## Security by design' \
   '[Build, run, package, and verify](docs/BUILDING.md)' \
@@ -94,7 +96,9 @@ for expected in \
   '[English](README.md)' \
   '离开桌面，工作仍在继续。' \
   '## 你可以做什么' \
+  '## 平台支持与下载' \
   '## 如何使用' \
+  '## 当前限制' \
   '## 从源码开始' \
   '## 安全设计' \
   '[构建、运行、打包和验证](docs/BUILDING.zh-CN.md)' \
