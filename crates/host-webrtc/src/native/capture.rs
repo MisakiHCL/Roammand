@@ -60,7 +60,9 @@ pub(crate) struct CapturePipeline {
 }
 
 impl CapturePipeline {
-    pub(crate) fn start() -> Result<Self, HostWebRtcError> {
+    pub(crate) fn start(
+        on_failure: impl FnOnce() + Send + 'static,
+    ) -> Result<Self, HostWebRtcError> {
         #[cfg(target_os = "macos")]
         if !macos_screen_capture_access(false) {
             return Err(HostWebRtcError::PeerFailure);
@@ -89,7 +91,16 @@ impl CapturePipeline {
         let capture_thread = thread::Builder::new()
             .name("roammand-main-display-capture".to_owned())
             .spawn(move || {
-                capture_loop(&mut capturer, &receiver, &thread_source, &thread_stop);
+                if capture_loop(
+                    || capturer.capture_frame(),
+                    &receiver,
+                    &thread_source,
+                    &thread_stop,
+                )
+                .is_err()
+                {
+                    on_failure();
+                }
             })
             .map_err(|_| HostWebRtcError::PeerFailure)?;
 
@@ -366,32 +377,33 @@ fn receive_initial_frame(
 }
 
 fn capture_loop(
-    capturer: &mut DesktopCaptureDriver,
+    mut request_frame: impl FnMut(),
     receiver: &CaptureReceiver,
     source: &NativeVideoSource,
     stop: &AtomicBool,
-) {
+) -> Result<(), HostWebRtcError> {
     let resolution = source.video_resolution();
     while !stop.load(Ordering::Acquire) {
         let started = std::time::Instant::now();
-        capturer.capture_frame();
+        request_frame();
         match receiver.recv_timeout(CAPTURE_RESULT_TIMEOUT) {
             Ok(CaptureMessage::Frame(frame)) => {
                 let same_resolution = u32::try_from(frame.width).ok() == Some(resolution.width)
                     && u32::try_from(frame.height).ok() == Some(resolution.height);
                 if !same_resolution {
-                    break;
+                    return Err(HostWebRtcError::PeerFailure);
                 }
                 publish_frame(source, &frame);
             }
             Ok(CaptureMessage::TemporaryError) | Err(RecvTimeoutError::Timeout) => {}
             Ok(CaptureMessage::PermanentError | CaptureMessage::InvalidFrame)
-            | Err(RecvTimeoutError::Disconnected) => break,
+            | Err(RecvTimeoutError::Disconnected) => return Err(HostWebRtcError::PeerFailure),
         }
         if let Some(remaining) = CAPTURE_FRAME_INTERVAL.checked_sub(started.elapsed()) {
             thread::sleep(remaining);
         }
     }
+    Ok(())
 }
 
 fn publish_frame(source: &NativeVideoSource, frame: &CapturedVideoFrame) {
@@ -413,6 +425,55 @@ mod tests {
     use std::{cell::Cell, collections::VecDeque};
 
     use super::*;
+
+    #[tokio::test]
+    async fn capture_loop_reports_terminal_failure_and_accepts_requested_stop() {
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: 1,
+                height: 1,
+            },
+            true,
+        );
+        let stop = AtomicBool::new(false);
+        for message in [CaptureMessage::PermanentError, CaptureMessage::InvalidFrame] {
+            let (publisher, receiver) = capture_channel();
+            publisher.publish(|| message);
+            assert_eq!(
+                capture_loop(|| {}, &receiver, &source, &stop),
+                Err(HostWebRtcError::PeerFailure)
+            );
+        }
+        let (publisher, receiver) = capture_channel();
+        drop(publisher);
+        assert_eq!(
+            capture_loop(|| {}, &receiver, &source, &stop),
+            Err(HostWebRtcError::PeerFailure)
+        );
+        stop.store(true, Ordering::Release);
+        assert_eq!(capture_loop(|| {}, &receiver, &source, &stop), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn capture_loop_reports_resolution_change_instead_of_silently_freezing() {
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: 1,
+                height: 1,
+            },
+            true,
+        );
+        let (publisher, receiver) = capture_channel();
+        publisher.publish(|| {
+            CaptureMessage::Frame(
+                CapturedVideoFrame::from_argb(2, 1, 8, &[0; 8]).expect("valid test frame"),
+            )
+        });
+        assert_eq!(
+            capture_loop(|| {}, &receiver, &source, &AtomicBool::new(false)),
+            Err(HostWebRtcError::PeerFailure)
+        );
+    }
 
     #[test]
     fn full_capture_queue_skips_pixel_preparation_until_consumed() {

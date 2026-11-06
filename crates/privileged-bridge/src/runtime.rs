@@ -444,28 +444,31 @@ fn run_helper_transport(
 ) -> Result<(), RuntimeBridgeError> {
     authenticate_helper(transport, config)?;
     let mut helper = HelperProtocol::new(backend);
-    while !shutdown.load(Ordering::Relaxed) {
-        match transport.try_receive() {
-            Ok(Some(encoded)) => {
-                let request = decode_and_validate_privileged_bridge_client_frame(&encoded)
-                    .map_err(|_| RuntimeBridgeError::InvalidMessage)?;
-                let response = helper
-                    .handle(&request)
-                    .map_err(|_| RuntimeBridgeError::Broker)?;
-                send_server_frame(transport, &response)?;
+    let result = (|| {
+        while !shutdown.load(Ordering::Relaxed) {
+            match transport.try_receive() {
+                Ok(Some(encoded)) => {
+                    let request = decode_and_validate_privileged_bridge_client_frame(&encoded)
+                        .map_err(|_| RuntimeBridgeError::InvalidMessage)?;
+                    let response = helper
+                        .handle(&request)
+                        .map_err(|_| RuntimeBridgeError::Broker)?;
+                    send_server_frame(transport, &response)?;
+                }
+                Ok(None) => {}
+                Err(TransportError::Disconnected) if shutdown.load(Ordering::Relaxed) => break,
+                Err(_) => return Err(RuntimeBridgeError::Transport),
             }
-            Ok(None) => {}
-            Err(TransportError::Disconnected) if shutdown.load(Ordering::Relaxed) => break,
-            Err(_) => return Err(RuntimeBridgeError::Transport),
+            if let Some(event) = helper.try_event().map_err(|_| RuntimeBridgeError::Broker)? {
+                send_server_frame(transport, &event)?;
+            }
+            thread::sleep(LOOP_INTERVAL);
         }
-        if let Some(event) = helper.try_event().map_err(|_| RuntimeBridgeError::Broker)? {
-            send_server_frame(transport, &event)?;
-        }
-        thread::sleep(LOOP_INTERVAL);
-    }
+        Ok(())
+    })();
     helper.shutdown();
     transport.fail_closed();
-    Ok(())
+    result
 }
 
 fn authenticate_server(

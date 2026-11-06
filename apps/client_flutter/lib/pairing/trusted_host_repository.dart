@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:fixnum/fixnum.dart';
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand/identity/device_display_name.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
@@ -30,7 +31,7 @@ final class TrustedHostRepositoryException implements Exception {
 
 final class TrustedHostRecord {
   TrustedHostRecord._(TrustedHostBinding binding)
-    : _hostIdentity = binding.hostIdentity.deepCopy(),
+    : _hostIdentity = copyDeviceIdentity(binding.hostIdentity),
       signalingEndpoint = Uri.parse(binding.signalingEndpoint),
       pairedAtUnixMs = binding.pairedAtUnixMs.toInt(),
       lastSuccessfulConnectionAtUnixMs = binding
@@ -46,13 +47,13 @@ final class TrustedHostRecord {
   final int displayOrder;
   final String _localAlias;
 
-  DeviceIdentity get hostIdentity => _hostIdentity.deepCopy();
+  DeviceIdentity get hostIdentity => copyDeviceIdentity(_hostIdentity);
   String get displayName =>
       _localAlias.isEmpty ? _hostIdentity.displayName : _localAlias;
   String? get localAlias => _localAlias.isEmpty ? null : _localAlias;
 
   TrustedHostBinding toBinding() => TrustedHostBinding(
-    hostIdentity: _hostIdentity,
+    hostIdentity: copyDeviceIdentity(_hostIdentity),
     signalingEndpoint: signalingEndpoint.toString(),
     pairedAtUnixMs: Int64(pairedAtUnixMs),
     lastSuccessfulConnectionAtUnixMs: Int64(lastSuccessfulConnectionAtUnixMs),

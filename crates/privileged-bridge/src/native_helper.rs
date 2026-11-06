@@ -261,7 +261,8 @@ impl HelperBackend for NativeHelperBackend {
             Err(NativePeerEventReceiveError::Empty) => Ok(None),
             Err(
                 error @ (NativePeerEventReceiveError::Disconnected
-                | NativePeerEventReceiveError::Overflow),
+                | NativePeerEventReceiveError::Overflow
+                | NativePeerEventReceiveError::CaptureFailed),
             ) => {
                 log_native_helper_failure("eventQueue", error);
                 Err(HelperProtocolError::Backend)

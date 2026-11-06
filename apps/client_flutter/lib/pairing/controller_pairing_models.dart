@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
 enum ControllerPairingState {
@@ -35,7 +36,9 @@ final class ControllerPairingSnapshot {
     List<String> sasWords = const <String>[],
     this.expiresAtUnixMs = 0,
     this.error,
-  }) : _hostIdentity = hostIdentity?.deepCopy(),
+  }) : _hostIdentity = hostIdentity == null
+           ? null
+           : copyDeviceIdentity(hostIdentity),
        _hostFingerprintSha256 = Uint8List.fromList(hostFingerprintSha256),
        sasWords = List<String>.unmodifiable(sasWords);
 
@@ -46,7 +49,11 @@ final class ControllerPairingSnapshot {
   final int expiresAtUnixMs;
   final ControllerPairingError? error;
 
-  DeviceIdentity? get hostIdentity => _hostIdentity?.deepCopy();
+  DeviceIdentity? get hostIdentity {
+    final identity = _hostIdentity;
+    return identity == null ? null : copyDeviceIdentity(identity);
+  }
+
   Uint8List get hostFingerprintSha256 =>
       Uint8List.fromList(_hostFingerprintSha256);
 

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand/pairing/controller_pairing_identity.dart';
 import 'package:roammand/pairing/device_identity_validator.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
@@ -26,7 +27,7 @@ final class DesktopControllerPairingIdentity
   DesktopControllerPairingIdentity({
     required DeviceIdentity identity,
     required PairingTranscriptSigner signTranscript,
-  }) : _identity = identity.deepCopy(),
+  }) : _identity = copyDeviceIdentity(identity),
        // ignore: prefer_initializing_formals, keeps the public argument readable.
        _signTranscript = signTranscript {
     try {
@@ -40,7 +41,7 @@ final class DesktopControllerPairingIdentity
   final PairingTranscriptSigner _signTranscript;
 
   @override
-  DeviceIdentity get publicIdentity => _identity.deepCopy();
+  DeviceIdentity get publicIdentity => copyDeviceIdentity(_identity);
 
   @override
   Future<Uint8List> sign(List<int> canonicalTranscript) async {

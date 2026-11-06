@@ -122,12 +122,15 @@ pub enum NativePeerEventReceiveError {
     Disconnected,
     #[error("native peer critical event queue overflowed")]
     Overflow,
+    #[error("native screen capture failed")]
+    CaptureFailed,
 }
 
 pub struct NativePeerEvents {
     receiver: Receiver<NativePeerEvent>,
     latest_fast_pointer: Arc<Mutex<Option<Vec<u8>>>>,
     overflowed: Arc<AtomicBool>,
+    capture_failed: Arc<AtomicBool>,
 }
 
 impl NativePeerEvents {
@@ -135,18 +138,21 @@ impl NativePeerEvents {
     ///
     /// # Errors
     ///
-    /// Returns an empty, disconnected, or critical-overflow error.
+    /// Returns an empty, disconnected, capture-failure, or critical-overflow error.
     pub fn recv_timeout(
         &self,
         timeout: Duration,
     ) -> Result<NativePeerEvent, NativePeerEventReceiveError> {
         let deadline = Instant::now().checked_add(timeout);
         loop {
+            if self.capture_failed.load(Ordering::Acquire) {
+                return Err(NativePeerEventReceiveError::CaptureFailed);
+            }
             if self.overflowed.swap(false, Ordering::AcqRel) {
                 return Err(NativePeerEventReceiveError::Overflow);
             }
             match self.receiver.try_recv() {
-                Ok(event) => return Ok(event),
+                Ok(event) => return self.checked_event(event),
                 Err(TryRecvError::Disconnected) => {
                     return Err(NativePeerEventReceiveError::Disconnected);
                 }
@@ -155,7 +161,7 @@ impl NativePeerEvents {
             match self.latest_fast_pointer.lock() {
                 Ok(mut latest) => {
                     if let Some(payload) = latest.take() {
-                        return Ok(NativePeerEvent::FastPointer(payload));
+                        return self.checked_event(NativePeerEvent::FastPointer(payload));
                     }
                 }
                 Err(_) => return Err(NativePeerEventReceiveError::Overflow),
@@ -169,12 +175,23 @@ impl NativePeerEvents {
                 .receiver
                 .recv_timeout(remaining.min(FAST_EVENT_POLL_INTERVAL))
             {
-                Ok(event) => return Ok(event),
+                Ok(event) => return self.checked_event(event),
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(NativePeerEventReceiveError::Disconnected);
                 }
                 Err(RecvTimeoutError::Timeout) => {}
             }
+        }
+    }
+
+    fn checked_event(
+        &self,
+        event: NativePeerEvent,
+    ) -> Result<NativePeerEvent, NativePeerEventReceiveError> {
+        if self.capture_failed.load(Ordering::Acquire) {
+            Err(NativePeerEventReceiveError::CaptureFailed)
+        } else {
+            Ok(event)
         }
     }
 }
@@ -184,6 +201,7 @@ struct EventPublisher {
     sender: SyncSender<NativePeerEvent>,
     latest_fast_pointer: Arc<Mutex<Option<Vec<u8>>>>,
     overflowed: Arc<AtomicBool>,
+    capture_failed: Arc<AtomicBool>,
 }
 
 impl EventPublisher {
@@ -216,6 +234,7 @@ impl NativePeerBackend {
         let (sender, receiver) = sync_channel(EVENT_QUEUE_CAPACITY);
         let latest_fast_pointer = Arc::new(Mutex::new(None));
         let overflowed = Arc::new(AtomicBool::new(false));
+        let capture_failed = Arc::new(AtomicBool::new(false));
         (
             Self {
                 options,
@@ -223,6 +242,7 @@ impl NativePeerBackend {
                     sender,
                     latest_fast_pointer: Arc::clone(&latest_fast_pointer),
                     overflowed: Arc::clone(&overflowed),
+                    capture_failed: Arc::clone(&capture_failed),
                 },
                 resources: None,
             },
@@ -230,6 +250,7 @@ impl NativePeerBackend {
                 receiver,
                 latest_fast_pointer,
                 overflowed,
+                capture_failed,
             },
         )
     }
@@ -242,7 +263,15 @@ impl NativePeerBackend {
         if self.resources.is_some() {
             return Err(HostWebRtcError::InvalidState);
         }
-        let capture = CapturePipeline::start()?;
+        self.publisher
+            .capture_failed
+            .store(false, Ordering::Release);
+        let capture_publisher = self.publisher.clone();
+        let capture = CapturePipeline::start(move || {
+            capture_publisher
+                .capture_failed
+                .store(true, Ordering::Release);
+        })?;
         let video_source = capture.source();
         let factory = PeerConnectionFactory::default();
         let peer = factory
@@ -635,6 +664,20 @@ pub fn parse_dtls_sha256_fingerprint(sdp: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_failure_preempts_queued_input_and_remains_terminal() {
+        let (peer, events) = NativePeerBackend::new(NativePeerOptions::default());
+        peer.publisher
+            .critical(NativePeerEvent::ReliableInput(vec![7]));
+        peer.publisher.capture_failed.store(true, Ordering::Release);
+        for _ in 0..2 {
+            assert_eq!(
+                events.recv_timeout(Duration::ZERO),
+                Err(NativePeerEventReceiveError::CaptureFailed)
+            );
+        }
+    }
 
     #[test]
     fn oversized_input_payloads_do_not_enter_event_queues() {

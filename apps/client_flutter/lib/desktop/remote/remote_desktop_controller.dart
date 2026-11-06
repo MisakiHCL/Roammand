@@ -9,6 +9,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:fixnum/fixnum.dart';
 import 'package:flutter/foundation.dart';
 import 'package:roammand/controller/session/controller_session_identity.dart';
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
 import '../../diagnostics/diagnostics_collector.dart';
@@ -155,7 +156,7 @@ final class RemoteDesktopController extends ChangeNotifier
       final controllerIdentity = await _identity.open();
       _requireActiveOperation(operationGeneration);
       validateDeviceIdentity(controllerIdentity);
-      _controllerIdentity = controllerIdentity.deepCopy();
+      _controllerIdentity = copyDeviceIdentity(controllerIdentity);
       _sessionId = _checkedRandom(_sessionIdBytes);
       _signalingSubscription = _signaling.routedSessions.listen(
         (event) {
@@ -486,10 +487,21 @@ final class RemoteDesktopController extends ChangeNotifier
       _answer = null;
       _reconnect = null;
       _answerDescription = null;
-      if (_reconnectSequence != null) {
-        _reconnectConnectionGracePending = true;
+      // The native peer may connect while answer application is still pending.
+      // Its event can precede this controller's input setup, so reconcile the
+      // peer's current state instead of waiting for another connected event.
+      if (_peer.state == ControllerPeerState.connected) {
+        if (_reconnectSequence != null) {
+          _completeReconnect();
+        } else {
+          _setState(RemoteDesktopState.connected);
+        }
+      } else {
+        if (_reconnectSequence != null) {
+          _reconnectConnectionGracePending = true;
+        }
+        _setState(RemoteDesktopState.connecting);
       }
-      _setState(RemoteDesktopState.connecting);
     } finally {
       _answerApplicationInFlight = false;
     }

@@ -147,21 +147,32 @@ final class HostAgentClient implements HostAgentApi {
       );
       _state = _ClientState.authenticating;
       _authenticated = Completer<LocalIpcAuthenticated>();
-      await _write(
-        LocalIpcClientFrame(
-          protocolVersion: _version(),
-          requestId: _authenticationRequestId,
-          authenticate: LocalIpcAuthenticate(
-            clientNonce: clientNonce,
-            clientProof: clientProof,
+      await Future.wait<void>(<Future<void>>[
+        _write(
+          LocalIpcClientFrame(
+            protocolVersion: _version(),
+            requestId: _authenticationRequestId,
+            authenticate: LocalIpcAuthenticate(
+              clientNonce: clientNonce,
+              clientProof: clientProof,
+            ),
+          ),
+        ).timeout(
+          handshakeTimeout,
+          onTimeout: () => throw const HostAgentTimeoutException(
+            'Host Agent authentication write timed out',
           ),
         ),
-      );
-      final authenticated = await _authenticated!.future.timeout(
-        handshakeTimeout,
-        onTimeout: () =>
-            throw const HostAgentTimeoutException('Host Agent proof timed out'),
-      );
+        _authenticated!.future
+            .timeout(
+              handshakeTimeout,
+              onTimeout: () => throw const HostAgentTimeoutException(
+                'Host Agent proof timed out',
+              ),
+            )
+            .then<void>((_) {}),
+      ], eagerError: true);
+      final authenticated = await _authenticated!.future;
       if (_state != _ClientState.authenticating) {
         throw const HostAgentDisconnectedException();
       }
@@ -445,12 +456,16 @@ final class HostAgentClient implements HostAgentApi {
         pending.fail(const HostAgentTimeoutException());
       }
     });
-    try {
-      await _write(frame);
-    } catch (_) {
-      final removed = _pending.remove(requestId);
-      removed?.fail(const HostAgentDisconnectedException());
-    }
+    // Observe the response immediately: a blocked native write must not delay
+    // delivery of the request timeout or leave its error without a listener.
+    unawaited(
+      _write(frame).catchError((Object _) {
+        if (identical(_pending[requestId], pending)) {
+          _pending.remove(requestId);
+          pending.fail(const HostAgentDisconnectedException());
+        }
+      }),
+    );
     return pending.future;
   }
 

@@ -8,7 +8,10 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +74,30 @@ func TestRunRejectsIncompleteTLSPairBeforeListening(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "SIGNALING_TLS_CERT_FILE and SIGNALING_TLS_KEY_FILE") {
 		t.Fatalf("run error = %v", err)
 	}
+}
+
+func TestRunReleasesListenerWhenTLSCertificateCannotBeLoaded(t *testing.T) {
+	var output bytes.Buffer
+	directory := t.TempDir()
+	err := run(context.Background(), mapEnvironment(map[string]string{
+		"SIGNALING_LISTEN_ADDR":   "127.0.0.1:0",
+		"SIGNALING_TLS_CERT_FILE": filepath.Join(directory, "missing-certificate.pem"),
+		"SIGNALING_TLS_KEY_FILE":  filepath.Join(directory, "missing-key.pem"),
+	}), &output, io.Discard)
+	if err == nil {
+		t.Fatal("run succeeded with a missing TLS certificate")
+	}
+	endpoint, err := url.Parse(strings.TrimSpace(strings.TrimPrefix(
+		output.String(), "roammand-signaling listening on ",
+	)))
+	if err != nil || endpoint.Host == "" {
+		t.Fatalf("startup endpoint = %q, parse error = %v", output.String(), err)
+	}
+	listener, err := net.Listen("tcp", endpoint.Host)
+	if err != nil {
+		t.Fatalf("listener was not released after TLS startup failed: %v", err)
+	}
+	defer listener.Close()
 }
 
 func TestHTTPServerEnforcesTLS12AndResourceTimeouts(t *testing.T) {

@@ -291,6 +291,36 @@ void main() {
     expect(fixture.adapter.answerCount, 1);
   });
 
+  test(
+    'accepts a connection reported before answer application ends',
+    () async {
+      final fixture = await _Fixture.create();
+      await fixture.controller.connect(fixture.target);
+      final offer = fixture.sentOffer();
+      final answerGate = Completer<void>();
+      fixture.adapter.answerGate = answerGate;
+      fixture.signaling.route(
+        fixture.envelope(
+          sessionAuthentication: SessionAuthentication(
+            answer: await fixture.signedAnswer(offer),
+          ),
+        ),
+      );
+      fixture.routeAnswerDescription(offer);
+      while (fixture.adapter.answerCount == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      fixture.adapter.emit(ControllerPeerEvent.connected);
+      await _pumpEvents();
+      answerGate.complete();
+      await _pumpEvents();
+
+      expect(fixture.controller.state, RemoteDesktopState.connected);
+      expect(fixture.controller.inputSender, isNotNull);
+    },
+  );
+
   test('close waits for teardown already started by a failure', () async {
     final fixture = await _Fixture.create();
     await fixture.controller.connect(fixture.target);
@@ -314,6 +344,38 @@ void main() {
     expect(fixture.adapter.closeCount, 1);
     expect(fixture.signaling.closeCount, 1);
     expect(fixture.agent.closeCount, 1);
+  });
+
+  test('keeps an early reconnect event after the answer finishes', () async {
+    final fixture = await _Fixture.create();
+    await fixture.connectFully();
+    fixture.adapter.emit(ControllerPeerEvent.disconnected);
+    await _pumpEvents();
+    await fixture.scheduler.fireNext();
+    final offer = fixture.sentOffers.last;
+    final answerGate = Completer<void>();
+    fixture.adapter.answerGate = answerGate;
+    fixture.signaling.route(
+      fixture.envelope(
+        sessionAuthentication: SessionAuthentication(
+          reconnect: await fixture.signedReconnect(offer, generation: 1),
+        ),
+      ),
+    );
+    fixture.routeAnswerDescription(offer);
+    while (fixture.adapter.answerCount < 2) {
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    fixture.adapter.emit(ControllerPeerEvent.connected);
+    await _pumpEvents();
+    answerGate.complete();
+    await _pumpEvents();
+
+    expect(fixture.controller.state, RemoteDesktopState.connected);
+    expect(fixture.controller.reconnectProgress, isNull);
+    expect(fixture.scheduler.activeCount, 0);
+    await fixture.controller.inputSender!.sendText('resumed');
   });
 
   test('saved diagnostics preserve a stable signaling server code', () async {

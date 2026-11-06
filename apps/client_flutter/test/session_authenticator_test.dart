@@ -79,6 +79,64 @@ void main() {
   });
 
   test(
+    'answer verification owns its expected and exported Host identity',
+    () async {
+      final fixture = await _Fixture.create();
+      final offer = SessionOfferAuthentication.fromBuffer(
+        fixture.offer.writeToBuffer(),
+      );
+      final answer = SessionAnswerAuthentication.fromBuffer(
+        (await fixture.signedAnswer()).writeToBuffer(),
+      );
+      final originalBytes = fixture.hostIdentity.writeToBuffer();
+      final verifier = fixture.verifier;
+      fixture.hostIdentity
+        ..publicKey[0] ^= 0xff
+        ..deviceId[0] ^= 0xff;
+
+      Future<VerifiedSessionAnswer> verify() => verifier.verify(
+        offer: offer,
+        answer: answer,
+        answerSdp: _answerSdp,
+        hostDtlsFingerprintSha256: fixture.hostFingerprint,
+        nowUnixMs: _nowUnixMs,
+      );
+      final verified = await verify();
+      expect(verified.hostIdentity.writeToBuffer(), originalBytes);
+      verified.hostIdentity
+        ..publicKey[0] ^= 0xff
+        ..deviceId[0] ^= 0xff;
+      expect((await verify()).hostIdentity.writeToBuffer(), originalBytes);
+    },
+  );
+
+  test(
+    'reconnect verification owns its expected Host identity bytes',
+    () async {
+      final fixture = await _Fixture.create();
+      final offer = SessionOfferAuthentication.fromBuffer(
+        fixture.offer.writeToBuffer(),
+      );
+      final reconnect = SessionReconnectAuthentication.fromBuffer(
+        (await fixture.signedReconnect()).writeToBuffer(),
+      );
+      fixture.hostIdentity
+        ..publicKey[0] ^= 0xff
+        ..deviceId[0] ^= 0xff;
+
+      final verified = await fixture.reconnectVerifier.verify(
+        offer: offer,
+        reconnect: reconnect,
+        answerSdp: _answerSdp,
+        hostDtlsFingerprintSha256: fixture.hostFingerprint,
+        previousGeneration: 6,
+        nowUnixMs: _nowUnixMs,
+      );
+      expect(verified.generation, 7);
+    },
+  );
+
+  test(
     'verifies a signed reconnect bound to the fresh Controller offer',
     () async {
       final fixture = await _Fixture.create();

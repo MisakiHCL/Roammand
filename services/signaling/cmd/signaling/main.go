@@ -57,6 +57,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	defer listener.Close()
 
 	logger := safelog.New(stderr)
 	options := service.DefaultOptions()

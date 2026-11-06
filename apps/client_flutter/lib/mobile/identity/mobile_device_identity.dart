@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:roammand/identity/device_display_name.dart';
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand/pairing/controller_pairing_identity.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
@@ -44,7 +45,7 @@ final class MobileDeviceIdentity implements ControllerPairingIdentity {
   }
 
   @override
-  DeviceIdentity get publicIdentity => _identity.deepCopy();
+  DeviceIdentity get publicIdentity => copyDeviceIdentity(_identity);
 
   @override
   Future<Uint8List> sign(List<int> message) async {

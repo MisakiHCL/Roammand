@@ -287,7 +287,11 @@ final class ControllerPeerSession {
         await adapter.addRemoteCandidate(candidate);
         _requireOpen();
       }
-      _state = ControllerPeerState.connecting;
+      // Native events can arrive before setRemoteAnswer or candidate draining
+      // completes. Preserve the newer connection state reported by callbacks.
+      if (_state == ControllerPeerState.awaitingVerifiedAnswer) {
+        _state = ControllerPeerState.connecting;
+      }
     } on PeerSessionException catch (error) {
       if (_closed || error.code == PeerSessionErrorCode.closed) {
         throw const PeerSessionException(PeerSessionErrorCode.closed);

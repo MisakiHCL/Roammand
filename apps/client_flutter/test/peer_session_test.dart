@@ -105,6 +105,24 @@ void main() {
     expect(preferred, contains('a=rtpmap:96 VP8/90000'));
   });
 
+  test('preserves a connection reported while applying the answer', () async {
+    final answerGate = Completer<void>();
+    final adapter = _FakePeerAdapter()..answerGate = answerGate;
+    final session = ControllerPeerSession(
+      adapter: adapter,
+      configuration: const ControllerPeerConfiguration(),
+    );
+    addTearDown(session.close);
+    await session.start();
+
+    final applying = session.applyVerifiedAnswer(_answerSdp);
+    adapter.emit(ControllerPeerEvent.connected);
+    answerGate.complete();
+    await applying;
+
+    expect(session.state, ControllerPeerState.connected);
+  });
+
   test('validates relay configuration and propagates peer failures', () async {
     expect(
       () => const ControllerPeerConfiguration(

@@ -71,7 +71,9 @@ impl RemotePeerEventSource for NativeEventSource {
             }
             Err(NativePeerEventReceiveError::Empty) => Ok(None),
             Err(
-                NativePeerEventReceiveError::Disconnected | NativePeerEventReceiveError::Overflow,
+                NativePeerEventReceiveError::Disconnected
+                | NativePeerEventReceiveError::Overflow
+                | NativePeerEventReceiveError::CaptureFailed,
             ) => Err(RemoteSessionError::Peer),
         }
     }

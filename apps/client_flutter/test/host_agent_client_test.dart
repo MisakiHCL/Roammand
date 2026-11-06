@@ -395,6 +395,51 @@ void main() {
     },
   );
 
+  test('a stalled request write still delivers the request deadline', () async {
+    final fixture = await _connectedFixture(
+      requestTimeout: const Duration(milliseconds: 10),
+    );
+    final writeGate = Completer<void>();
+    fixture.transport.writeGate = writeGate;
+    addTearDown(() async {
+      writeGate.complete();
+      await fixture.client.close();
+    });
+
+    await expectLater(
+      fixture.client.getHostStatus().timeout(const Duration(seconds: 1)),
+      throwsA(isA<HostAgentTimeoutException>()),
+    );
+  });
+
+  test(
+    'a stalled authentication write respects the handshake deadline',
+    () async {
+      final writeGate = Completer<void>();
+      final transport = FakeLocalIpcTransport()..writeGate = writeGate;
+      final client = HostAgentClient(
+        connector: FakeConnector(transport, Uint8List.fromList(_tokenBytes)),
+        randomBytes: (_) => Uint8List.fromList(_clientNonce),
+        handshakeTimeout: const Duration(milliseconds: 30),
+      );
+      addTearDown(() async {
+        writeGate.complete();
+        await client.close();
+      });
+      final connecting = client.connect();
+      final result = expectLater(
+        connecting.timeout(const Duration(seconds: 1)),
+        throwsA(isA<HostAgentTimeoutException>()),
+      );
+      await _sendChallenge(transport);
+      await transport.takeClientFrame();
+      await result;
+
+      expect(client.isReady, isFalse);
+      expect(transport.closeCount, 1);
+    },
+  );
+
   test(
     'disconnect completes every pending request with a stable error',
     () async {
@@ -836,6 +881,7 @@ class FakeLocalIpcTransport implements LocalIpcTransport {
   final List<Uint8List> _writes = <Uint8List>[];
   final List<Completer<Uint8List>> _writeWaiters = <Completer<Uint8List>>[];
   int closeCount = 0;
+  Completer<void>? writeGate;
 
   @override
   Stream<List<int>> get incoming => _incoming.stream;
@@ -848,6 +894,7 @@ class FakeLocalIpcTransport implements LocalIpcTransport {
     } else {
       _writes.add(copy);
     }
+    await writeGate?.future;
   }
 
   Future<LocalIpcClientFrame> takeClientFrame() async {

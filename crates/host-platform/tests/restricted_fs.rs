@@ -50,6 +50,43 @@ fn private_files_enforce_size_limits_and_idempotent_removal() {
     remove_private_file(&path).expect("repeated remove must succeed");
 }
 
+#[test]
+fn private_file_reads_support_the_largest_limit() {
+    let temporary = tempdir().expect("temporary directory must be created");
+    let path = temporary.path().join("state.bin");
+    atomic_write_private(&path, b"value").expect("write must succeed");
+
+    assert_eq!(
+        read_private_file(&path, usize::MAX).expect("large limit must not overflow"),
+        b"value"
+    );
+}
+
+#[test]
+fn private_file_reads_refuse_directories() {
+    let temporary = tempdir().expect("temporary directory must be created");
+
+    assert!(matches!(
+        read_private_file(temporary.path(), usize::MAX),
+        Err(RestrictedFsError::NotRegularFile)
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn private_file_reads_refuse_fifos_without_waiting_for_a_writer() {
+    use nix::{sys::stat::Mode, unistd::mkfifo};
+
+    let temporary = tempdir().expect("temporary directory must be created");
+    let path = temporary.path().join("state.bin");
+    mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).expect("FIFO must be created");
+
+    assert!(matches!(
+        read_private_file(&path, 64),
+        Err(RestrictedFsError::NotRegularFile)
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn private_paths_refuse_symbolic_links() {
@@ -72,6 +109,10 @@ fn private_paths_refuse_symbolic_links() {
     symlink(&real_file, &linked_file).expect("file symlink must be created");
     assert!(matches!(
         atomic_write_private(&linked_file, b"replacement"),
+        Err(RestrictedFsError::SymbolicLink)
+    ));
+    assert!(matches!(
+        read_private_file(&linked_file, 64),
         Err(RestrictedFsError::SymbolicLink)
     ));
 }

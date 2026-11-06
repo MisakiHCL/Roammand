@@ -191,14 +191,22 @@ impl HelperProtocol {
     ///
     /// # Errors
     ///
-    /// Rejects events without an active route and sequence overflow.
+    /// Rejects events without an active route and sequence overflow. Backend
+    /// failures release the active lease and native resources before returning.
     pub fn try_event(
         &mut self,
     ) -> Result<Option<PrivilegedBridgeServerFrame>, HelperProtocolError> {
         if self.failed {
             return Err(HelperProtocolError::Backend);
         }
-        let Some(event) = self.backend.try_event()? else {
+        let event = match self.backend.try_event() {
+            Ok(event) => event,
+            Err(error) => {
+                self.fail_closed();
+                return Err(error);
+            }
+        };
+        let Some(event) = event else {
             return Ok(None);
         };
         let route = self.gate.current().ok_or(HelperProtocolError::StaleRoute)?;

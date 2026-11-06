@@ -61,6 +61,21 @@ impl RemotePeerEventSource for QueuedEvents {
     }
 }
 
+struct FailedEvents;
+impl RemotePeerEventSource for FailedEvents {
+    fn try_recv(&self) -> Result<Option<RemotePeerEvent>, RemoteSessionError> {
+        Err(RemoteSessionError::Peer)
+    }
+}
+
+struct TrackedInput(Arc<Mutex<bool>>);
+impl RemoteInputSink for TrackedInput {
+    fn release_all(&mut self) -> Result<(), HostWebRtcError> {
+        *self.0.lock().unwrap() = true;
+        Ok(())
+    }
+}
+
 fn service() -> Arc<HostService> {
     let identity = HostIdentity::load_or_create(
         &MemorySecretStore::new(),
@@ -314,6 +329,50 @@ fn peer_input_batches_preserve_reliable_sequences_and_yield_after_a_bounded_coun
     );
     assert!(queued.lock().unwrap().is_empty());
     assert!(!*closed.lock().unwrap());
+}
+
+#[test]
+fn peer_event_source_failure_releases_input_and_closes_instead_of_reconnecting() {
+    for batch in [false, true] {
+        let ActiveFixture {
+            mut coordinator,
+            closed,
+            ..
+        } = active_coordinator(None, VecDeque::new());
+        let released = Arc::new(Mutex::new(false));
+        let mut session = HostPeerSession::new(
+            vec![2; 16],
+            &[
+                SessionPermission::ViewScreen,
+                SessionPermission::ControlInput,
+            ],
+            SessionConfig::new(IceTransportPolicy::All),
+            Box::new(TestResources(Arc::clone(&closed))),
+            Box::new(TrackedInput(Arc::clone(&released))),
+        )
+        .unwrap();
+        session.accept_offer("v=0\r\n").unwrap();
+        session.mark_connected().unwrap();
+        let active = coordinator.active.as_mut().unwrap();
+        active.session = session;
+        active.events = Box::new(FailedEvents);
+        *closed.lock().unwrap() = false;
+
+        let now = now_unix_ms().unwrap();
+        let result = if batch {
+            coordinator.poll_peer_events(now)
+        } else {
+            coordinator.poll_peer_event(now)
+        };
+
+        assert_eq!(result, Err(RemoteSessionError::Peer));
+        assert!(*released.lock().unwrap());
+        assert!(*closed.lock().unwrap());
+        assert!(!coordinator.has_active_session());
+        assert_eq!(coordinator.service.active_session_count(), 0);
+        coordinator.signaling_lost(now).unwrap();
+        assert_eq!(coordinator.reconnect_deadline_unix_ms(), None);
+    }
 }
 
 #[test]

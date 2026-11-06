@@ -36,7 +36,10 @@ impl FramedBridgeRpc {
             .map_err(|_| ProxyError::InvalidMessage)
     }
 
-    fn enqueue_event(&mut self, frame: PrivilegedBridgeServerFrame) -> Result<bool, ProxyError> {
+    fn enqueue_event(
+        &mut self,
+        frame: PrivilegedBridgeServerFrame,
+    ) -> Result<Option<PrivilegedBridgeServerFrame>, ProxyError> {
         let Some(payload) = frame.payload.as_ref() else {
             return Err(ProxyError::InvalidMessage);
         };
@@ -45,15 +48,15 @@ impl FramedBridgeRpc {
                 .events
                 .push_fast(frame)
                 .map_err(|_| ProxyError::FailedClosed)
-                .map(|()| true),
+                .map(|()| None),
             privileged_bridge_server_frame::Payload::LocalIceCandidate(_)
             | privileged_bridge_server_frame::Payload::PeerStateChanged(_)
             | privileged_bridge_server_frame::Payload::ReliableInput(_) => self
                 .events
                 .push_critical(frame)
                 .map_err(|_| ProxyError::FailedClosed)
-                .map(|()| true),
-            _ => Ok(false),
+                .map(|()| None),
+            _ => Ok(Some(frame)),
         }
     }
 
@@ -94,12 +97,12 @@ impl BridgeRpc for FramedBridgeRpc {
                 Ok(response) => response,
                 Err(error) => return self.reject(error),
             };
-            match self.enqueue_event(response.clone()) {
-                Ok(true) => continue,
-                Ok(false) => {}
+            let response = match self.enqueue_event(response) {
+                Ok(None) => continue,
+                Ok(Some(response)) => response,
                 Err(error) => return self.reject(error),
-            }
-            if response.request_id != request.request_id {
+            };
+            if response.request_id != request.request_id || response.sequence != request.sequence {
                 return self.reject(ProxyError::StaleResponse);
             }
             return Ok(response);
@@ -122,10 +125,11 @@ impl BridgeRpc for FramedBridgeRpc {
             Ok(frame) => frame,
             Err(error) => return self.reject(error),
         };
-        if !matches!(self.enqueue_event(frame), Ok(true)) {
-            return self.reject(ProxyError::StaleResponse);
+        match self.enqueue_event(frame) {
+            Ok(None) => self.queued_event(),
+            Ok(Some(_)) => self.reject(ProxyError::StaleResponse),
+            Err(error) => self.reject(error),
         }
-        self.queued_event()
     }
 
     fn fail_closed(&mut self) {

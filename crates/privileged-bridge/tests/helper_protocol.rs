@@ -19,6 +19,7 @@ use roammand_protocol::roammand::v1::{
 struct FakeBackend {
     operations: Arc<Mutex<Vec<&'static str>>>,
     local_stop: bool,
+    event_failure: bool,
 }
 
 impl HelperBackend for FakeBackend {
@@ -67,6 +68,9 @@ impl HelperBackend for FakeBackend {
     }
 
     fn try_event(&mut self) -> Result<Option<ProxyEvent>, HelperProtocolError> {
+        if self.event_failure {
+            return Err(HelperProtocolError::Backend);
+        }
         if self.local_stop {
             self.local_stop = false;
             return Ok(Some(ProxyEvent::LocalStop));
@@ -78,7 +82,12 @@ impl HelperBackend for FakeBackend {
         })))
     }
 
-    fn fail_closed(&mut self) {}
+    fn fail_closed(&mut self) {
+        self.operations
+            .lock()
+            .expect("operations")
+            .push("fail-closed");
+    }
 }
 
 #[test]
@@ -87,6 +96,7 @@ fn attaches_one_route_and_executes_only_typed_peer_commands() {
     let backend = FakeBackend {
         operations: Arc::clone(&operations),
         local_stop: false,
+        event_failure: false,
     };
     let mut helper = HelperProtocol::new(Box::new(backend));
     let route = ProxyRoute::new(
@@ -145,6 +155,7 @@ fn rejects_stale_commands_after_release_without_touching_the_backend() {
     let backend = FakeBackend {
         operations: Arc::clone(&operations),
         local_stop: false,
+        event_failure: false,
     };
     let mut helper = HelperProtocol::new(Box::new(backend));
     let route = ProxyRoute::new(
@@ -182,6 +193,7 @@ fn encodes_a_local_stop_as_a_terminal_peer_state() {
     let mut helper = HelperProtocol::new(Box::new(FakeBackend {
         operations: Arc::new(Mutex::new(Vec::new())),
         local_stop: true,
+        event_failure: false,
     }));
     helper.handle(&start_request(route, 1)).expect("start");
 
@@ -194,6 +206,33 @@ fn encodes_a_local_stop_as_a_terminal_peer_state() {
     assert_eq!(
         PrivilegedPeerState::try_from(state.state),
         Ok(PrivilegedPeerState::Closed)
+    );
+}
+
+#[test]
+fn native_event_failure_cleans_up_once_and_rejects_later_commands() {
+    let operations = Arc::new(Mutex::new(Vec::new()));
+    let mut helper = HelperProtocol::new(Box::new(FakeBackend {
+        operations: Arc::clone(&operations),
+        local_stop: false,
+        event_failure: true,
+    }));
+    let route = ProxyRoute::new(
+        roammand_privileged_bridge::lease::LeaseId::new([0x41; 16]),
+        10,
+    );
+    helper.handle(&start_request(route, 1)).expect("start");
+
+    assert_eq!(helper.try_event(), Err(HelperProtocolError::Backend));
+    assert_eq!(helper.try_event(), Err(HelperProtocolError::Backend));
+    assert_eq!(
+        helper.handle(&start_request(route, 2)),
+        Err(HelperProtocolError::Backend)
+    );
+    helper.shutdown();
+    assert_eq!(
+        *operations.lock().expect("operations"),
+        ["start", "fail-closed"]
     );
 }
 

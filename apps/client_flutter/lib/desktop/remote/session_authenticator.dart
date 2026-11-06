@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
 const _deviceIdBytes = 32;
@@ -55,7 +56,7 @@ final class VerifiedSessionAnswer {
 
 final class SessionAnswerVerifier {
   SessionAnswerVerifier({required DeviceIdentity expectedHost})
-    : _expectedHost = expectedHost.deepCopy() {
+    : _expectedHost = copyDeviceIdentity(expectedHost) {
     if (!_isValidHostIdentity(_expectedHost)) {
       throw const SessionAnswerAuthenticationException(
         SessionAnswerAuthenticationErrorCode.invalidHostIdentity,
@@ -107,7 +108,7 @@ final class SessionAnswerVerifier {
       _fail(SessionAnswerAuthenticationErrorCode.invalidSignature);
     }
     return VerifiedSessionAnswer(
-      hostIdentity: _expectedHost.deepCopy(),
+      hostIdentity: copyDeviceIdentity(_expectedHost),
       sessionId: answer.sessionId,
       permissions: permissions,
     );
@@ -154,7 +155,7 @@ final class VerifiedSessionReconnect {
 
 final class SessionReconnectVerifier {
   SessionReconnectVerifier({required DeviceIdentity expectedHost})
-    : _expectedHost = expectedHost.deepCopy() {
+    : _expectedHost = copyDeviceIdentity(expectedHost) {
     if (!_isValidHostIdentity(_expectedHost)) {
       _failReconnect(
         SessionReconnectAuthenticationErrorCode.invalidHostIdentity,

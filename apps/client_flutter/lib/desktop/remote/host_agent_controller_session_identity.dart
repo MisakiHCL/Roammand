@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart' as hashes;
 import 'package:cryptography/cryptography.dart';
 import 'package:roammand/controller/session/controller_session_identity.dart';
 import 'package:roammand/desktop/host_agent/host_agent_models.dart';
+import 'package:roammand/identity/device_identity_copy.dart';
 import 'package:roammand/pairing/device_identity_validator.dart';
 import 'package:roammand_protocol/roammand_protocol.dart';
 
@@ -27,10 +28,10 @@ final class HostAgentControllerSessionIdentity
       _requireOpen();
       final status = await _port.getHostStatus();
       _requireOpen();
-      final identity = status.identity.deepCopy();
+      final identity = copyDeviceIdentity(status.identity);
       validateDesktopHostIdentity(identity);
       _identity = identity;
-      return identity.deepCopy();
+      return copyDeviceIdentity(identity);
     } catch (_) {
       await close();
       throw const ControllerSessionIdentityException();

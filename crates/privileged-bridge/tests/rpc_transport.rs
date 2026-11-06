@@ -113,6 +113,20 @@ fn malformed_or_unsolicited_responses_fail_closed() {
             }),
         )
         .encode_to_vec(),
+        server_frame(
+            "lease-1",
+            2,
+            privileged_bridge_server_frame::Payload::Lease(PrivilegedLease {
+                lease_id: vec![0x11; 16],
+                generation: 3,
+                issued_at_unix_ms: 10,
+                expires_at_unix_ms: 20,
+                session_id: vec![0x21; 16],
+                permissions: vec![SessionPermission::ViewScreen as i32],
+                controller_display_name: "Controller".to_owned(),
+            }),
+        )
+        .encode_to_vec(),
     ] {
         let failed = Arc::new(Mutex::new(false));
         let transport = FakeTransport {

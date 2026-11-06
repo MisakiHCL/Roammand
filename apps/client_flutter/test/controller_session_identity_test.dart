@@ -73,7 +73,11 @@ void main() {
         ),
       );
       final adapter = HostAgentControllerSessionIdentity(port);
-      expect(await adapter.open(), identity);
+      final opened = await adapter.open();
+      expect(opened, identity);
+      opened
+        ..publicKey[0] ^= 0xff
+        ..deviceId[0] ^= 0xff;
 
       if (mutation == _SignatureMutation.none) {
         expect(await adapter.signOffer(transcript), validSignature.bytes);

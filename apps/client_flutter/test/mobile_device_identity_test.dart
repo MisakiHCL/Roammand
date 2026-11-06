@@ -49,8 +49,13 @@ void main() {
         isTrue,
       );
 
-      final mutableCopy = identity.publicIdentity..displayName = 'Changed';
+      final originalBytes = identity.publicIdentity.writeToBuffer();
+      final mutableCopy = identity.publicIdentity
+        ..displayName = 'Changed'
+        ..publicKey[0] ^= 0xff
+        ..deviceId[0] ^= 0xff;
       expect(mutableCopy.displayName, 'Changed');
+      expect(identity.publicIdentity.writeToBuffer(), originalBytes);
       expect(identity.publicIdentity.displayName, 'Alice’s iPhone');
       final deviceIdHex = identity.publicIdentity.deviceId
           .map((byte) => byte.toRadixString(16).padLeft(2, '0'))

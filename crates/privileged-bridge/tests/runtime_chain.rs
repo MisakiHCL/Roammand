@@ -86,11 +86,22 @@ impl HelperBackend for RecordingBackend {
         Ok(None)
     }
 
-    fn fail_closed(&mut self) {}
+    fn fail_closed(&mut self) {
+        self.0.lock().expect("operations").push("fail-closed");
+    }
 }
 
 #[test]
 fn host_broker_and_helper_exchange_real_framed_socket_messages() {
+    verify_runtime_chain(false);
+}
+
+#[test]
+fn unexpected_broker_disconnect_cleans_up_the_active_native_helper() {
+    verify_runtime_chain(true);
+}
+
+fn verify_runtime_chain(disconnect_broker: bool) {
     let temporary = TempDir::new().expect("temp");
     let socket_path = temporary.path().join("bridge.sock");
     let executable_hash = installed_file_sha256(&std::env::current_exe().expect("current exe"))
@@ -111,7 +122,11 @@ fn host_broker_and_helper_exchange_real_framed_socket_messages() {
 
     let operations = Arc::new(Mutex::new(Vec::new()));
     let helper_operations = Arc::clone(&operations);
-    let helper_shutdown = Arc::clone(&shutdown);
+    let helper_shutdown = if disconnect_broker {
+        Arc::new(AtomicBool::new(false))
+    } else {
+        Arc::clone(&shutdown)
+    };
     let helper_path = socket_path.clone();
     let helper = thread::spawn(move || {
         run_unix_helper(
@@ -170,13 +185,24 @@ fn host_broker_and_helper_exchange_real_framed_socket_messages() {
         "answer"
     );
     input.release_all().expect("input");
-    peer.close().expect("close and release");
+    if !disconnect_broker {
+        peer.close().expect("close and release");
+    }
 
     shutdown.store(true, Ordering::Relaxed);
-    assert!(helper.join().expect("helper join").is_ok());
+    let helper_result = helper.join().expect("helper join");
+    if disconnect_broker {
+        assert!(helper_result.is_err());
+    } else {
+        assert!(helper_result.is_ok());
+    }
     assert!(broker.join().expect("broker join").is_ok());
     let operations = operations.lock().expect("operations");
-    assert!(operations.starts_with(&["start", "input", "close"]));
+    assert!(operations.starts_with(&["start", "input"]));
+    if !disconnect_broker {
+        assert!(operations.contains(&"close"));
+    }
+    assert_eq!(operations.last(), Some(&"fail-closed"));
 }
 
 fn retry_probe(

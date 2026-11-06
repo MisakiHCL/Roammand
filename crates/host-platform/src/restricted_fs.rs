@@ -22,6 +22,8 @@ pub enum RestrictedFsError {
     SymbolicLink,
     #[error("private directory path is not a directory")]
     NotDirectory,
+    #[error("private file path is not a regular file")]
+    NotRegularFile,
     #[error("private file is larger than its configured limit")]
     FileTooLarge,
     #[error("private file path has no parent or file name")]
@@ -90,26 +92,47 @@ pub fn atomic_write_private(path: &Path, contents: &[u8]) -> Result<(), Restrict
 ///
 /// # Errors
 ///
-/// Returns an error for symbolic links, oversized files, or filesystem
-/// failures.
+/// Returns an error for symbolic links, non-regular files, oversized files, or
+/// filesystem failures.
 pub fn read_private_file(path: &Path, maximum_bytes: usize) -> Result<Vec<u8>, RestrictedFsError> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        return Err(RestrictedFsError::SymbolicLink);
+    validate_file_metadata(&fs::symlink_metadata(path)?, maximum_bytes)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        // A replaced path must not redirect the read or block on a FIFO.
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
     }
-    if metadata.len() > maximum_bytes as u64 {
-        return Err(RestrictedFsError::FileTooLarge);
-    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    validate_file_metadata(&metadata, maximum_bytes)?;
 
     let capacity = usize::try_from(metadata.len()).map_err(|_| RestrictedFsError::FileTooLarge)?;
     let mut contents = Vec::with_capacity(capacity);
-    File::open(path)?
-        .take(maximum_bytes as u64 + 1)
+    file.take((maximum_bytes as u64).saturating_add(1))
         .read_to_end(&mut contents)?;
     if contents.len() > maximum_bytes {
         return Err(RestrictedFsError::FileTooLarge);
     }
     Ok(contents)
+}
+
+fn validate_file_metadata(
+    metadata: &fs::Metadata,
+    maximum_bytes: usize,
+) -> Result<(), RestrictedFsError> {
+    if metadata.file_type().is_symlink() {
+        return Err(RestrictedFsError::SymbolicLink);
+    }
+    if !metadata.is_file() {
+        return Err(RestrictedFsError::NotRegularFile);
+    }
+    if metadata.len() > maximum_bytes as u64 {
+        return Err(RestrictedFsError::FileTooLarge);
+    }
+    Ok(())
 }
 
 /// Removes a private file if it exists.

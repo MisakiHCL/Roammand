@@ -46,6 +46,56 @@ void main() {
     },
   );
 
+  test('exported bindings cannot mutate the saved Host identity', () async {
+    final persistence = FakeTrustedHostPersistence(<TrustedHostBinding>[
+      _binding(1),
+    ]);
+    final repository = TrustedHostRepository(persistence: persistence);
+    addTearDown(repository.close);
+    await repository.initialize();
+    final record = repository.hosts.single;
+    final originalIdentity = DeviceIdentity.fromBuffer(
+      record.hostIdentity.writeToBuffer(),
+    );
+
+    final exported = record.toBinding();
+    exported.hostIdentity
+      ..displayName = 'Changed'
+      ..publicKey[0] ^= 0xff
+      ..deviceId[0] ^= 0xff;
+
+    expect(record.hostIdentity, originalIdentity);
+    expect(record.displayName, 'Host 1');
+    await repository.renameLocal(
+      originalIdentity.deviceId,
+      displayName: 'Studio Mac',
+    );
+    expect(persistence.stored.single.hostIdentity, originalIdentity);
+  });
+
+  test('Host identity bytes are detached on import and access', () async {
+    final binding = _binding(1);
+    final originalIdentity = DeviceIdentity.fromBuffer(
+      binding.hostIdentity.writeToBuffer(),
+    );
+    final repository = TrustedHostRepository(
+      persistence: FakeTrustedHostPersistence(<TrustedHostBinding>[binding]),
+    );
+    addTearDown(repository.close);
+    await repository.initialize();
+    final record = repository.hosts.single;
+
+    binding.hostIdentity
+      ..publicKey[0] ^= 0xff
+      ..deviceId[0] ^= 0xff;
+    expect(record.hostIdentity, originalIdentity);
+
+    record.hostIdentity
+      ..publicKey[0] ^= 0xff
+      ..deviceId[0] ^= 0xff;
+    expect(record.hostIdentity, originalIdentity);
+  });
+
   test(
     'rejects duplicate Hosts and keeps memory unchanged on save failure',
     () async {

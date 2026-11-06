@@ -430,7 +430,8 @@ impl RemoteSessionCoordinator {
     ///
     /// # Errors
     ///
-    /// Returns a stable peer or event-processing error.
+    /// Returns a stable peer or event-processing error. An event-source failure
+    /// closes the peer because reliable input transitions may have been lost.
     pub fn poll_peer_event(
         &mut self,
         now_unix_ms: u64,
@@ -438,10 +439,7 @@ impl RemoteSessionCoordinator {
         if self.expire_active_reconnect(now_unix_ms)? {
             return Ok(Vec::new());
         }
-        let event = match self.active.as_ref() {
-            Some(active) => active.events.try_recv()?,
-            None => None,
-        };
+        let event = self.next_peer_event(now_unix_ms)?;
         event.map_or_else(
             || Ok(Vec::new()),
             |event| self.handle_peer_event(event, now_unix_ms),
@@ -473,13 +471,7 @@ impl RemoteSessionCoordinator {
         let started = std::time::Instant::now();
         let mut outbound = Vec::new();
         for _ in 0..MAX_EVENTS {
-            let Some(event) = self
-                .active
-                .as_ref()
-                .map(|active| active.events.try_recv())
-                .transpose()?
-                .flatten()
-            else {
+            let Some(event) = self.next_peer_event(now_unix_ms)? else {
                 break;
             };
             outbound.extend(self.handle_peer_event(event, now_unix_ms)?);
@@ -490,6 +482,26 @@ impl RemoteSessionCoordinator {
             }
         }
         Ok(outbound)
+    }
+
+    fn next_peer_event(
+        &mut self,
+        now_unix_ms: u64,
+    ) -> Result<Option<RemotePeerEvent>, RemoteSessionError> {
+        let result = self
+            .active
+            .as_ref()
+            .map_or(Ok(None), |active| active.events.try_recv());
+        match result {
+            Ok(event) => Ok(event),
+            Err(error) => {
+                // A disconnected or overflowing queue can lose key/button-up
+                // events. Retaining that peer for ICE restart is unsafe even
+                // if signaling itself can reconnect successfully.
+                self.close_active(Some(session_error(protocol_error_for(error))), now_unix_ms)?;
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn has_active_session(&self) -> bool {

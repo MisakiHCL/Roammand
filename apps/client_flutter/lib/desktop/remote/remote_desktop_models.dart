@@ -66,14 +66,16 @@ final class RemoteDesktopTarget {
   RemoteDesktopTarget({
     required DeviceIdentity hostIdentity,
     required this.signalingEndpoint,
-  }) : hostIdentity = hostIdentity.deepCopy();
+  }) : _hostIdentity = copyDeviceIdentity(hostIdentity);
 
-  final DeviceIdentity hostIdentity;
+  final DeviceIdentity _hostIdentity;
   final Uri signalingEndpoint;
+
+  DeviceIdentity get hostIdentity => copyDeviceIdentity(_hostIdentity);
 
   void validate() {
     try {
-      validateDeviceIdentity(hostIdentity);
+      validateDeviceIdentity(_hostIdentity);
       validateSignalingEndpoint(signalingEndpoint);
     } catch (_) {
       throw const RemoteDesktopException(RemoteDesktopErrorCode.configuration);
