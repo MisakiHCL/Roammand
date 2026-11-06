@@ -51,6 +51,15 @@ NATIVE_WEBRTC_RELEASE_URL = "https://github.com/livekit/rust-sdks/releases/tag"
 REPOSITORY_DART_PATH_DEPENDENCIES: dict[str, pathlib.PurePosixPath] = {
     "flutter_webrtc": pathlib.PurePosixPath("third_party/flutter_webrtc"),
 }
+REPOSITORY_CARGO_PATH_DEPENDENCIES: dict[str, pathlib.PurePosixPath] = {
+    "webrtc-sys-build": pathlib.PurePosixPath("third_party/webrtc-sys-build"),
+}
+REPOSITORY_CARGO_REQUIRED_NOTICES: dict[str, frozenset[pathlib.PurePosixPath]] = {
+    "webrtc-sys-build": frozenset(
+        pathlib.PurePosixPath(name)
+        for name in ("LICENSE", "NOTICE", "NOTICE.md", "DOWNSTREAM_PATCH.md")
+    ),
+}
 REPOSITORY_DART_NOTICE_EXACT_PATHS: dict[
     str, frozenset[pathlib.PurePosixPath]
 ] = {
@@ -546,7 +555,13 @@ def validated_source_input_digests(
         digests[relative] = hashlib.sha256(current_bytes).hexdigest()
 
     repository_trees = sorted(
-        {path.as_posix() for path in REPOSITORY_DART_PATH_DEPENDENCIES.values()}
+        {
+            path.as_posix()
+            for path in (
+                *REPOSITORY_DART_PATH_DEPENDENCIES.values(),
+                *REPOSITORY_CARGO_PATH_DEPENDENCIES.values(),
+            )
+        }
     )
     for tree in repository_trees:
         prefix = f"{tree.rstrip('/')}/"

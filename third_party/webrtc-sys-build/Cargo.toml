@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "webrtc-sys-build"
+version = "0.3.14"
+edition = "2021"
+license = "Apache-2.0"
+description = "Build utilities when working with libwebrtc"
+repository = "https://github.com/livekit/rust-sdks"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+fs2 = "0.4"
+regex = "1.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
+scratch = "1.0"
+semver = "1.0"
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

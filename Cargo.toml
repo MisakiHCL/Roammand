@@ -6,8 +6,13 @@ members = [
   "crates/ipc",
   "crates/privileged-bridge",
   "gen/rust",
+  "third_party/webrtc-sys-build",
 ]
 resolver = "3"
+
+[patch.crates-io]
+# Keep the verified native WebRTC release while updating its ZIP build utility.
+webrtc-sys-build = { path = "third_party/webrtc-sys-build" }
 
 [workspace.package]
 edition = "2024"

@@ -16,6 +16,8 @@ from .model import (
     LICENSE_RELATIVE_PATH,
     NATIVE_WEBRTC_RELEASE_URL,
     NOTICE_PREFIXES,
+    REPOSITORY_CARGO_PATH_DEPENDENCIES,
+    REPOSITORY_CARGO_REQUIRED_NOTICES,
     REPOSITORY_DART_NOTICE_EXACT_PATHS,
     REPOSITORY_DART_PATH_DEPENDENCIES,
     RUST_RELEASE_ROOTS,
@@ -295,9 +297,13 @@ def cargo_components(
             if not isinstance(package, dict):
                 continue
             package_id = str(package.get("id") or "")
-            if package_id not in roles or not package.get("source"):
-                continue
             name = str(package.get("name") or "")
+            source = str(package.get("source") or "")
+            repository_relative = (
+                REPOSITORY_CARGO_PATH_DEPENDENCIES.get(name) if not source else None
+            )
+            if package_id not in roles or (not source and repository_relative is None):
+                continue
             version = str(package.get("version") or "")
             if not name or not version:
                 raise fail("Cargo metadata contains a package without name or version")
@@ -307,6 +313,18 @@ def cargo_components(
                 raise fail(f"Cargo package {name} has no declared license")
             license_declared = normalize_cargo_license(license_raw)
             manifest = pathlib.Path(str(package.get("manifest_path") or ""))
+            if repository_relative is not None:
+                expected_manifest = repo_root / repository_relative / "Cargo.toml"
+                if manifest.resolve() != expected_manifest.resolve():
+                    raise fail(
+                        f"Cargo path package {name} must resolve to repository "
+                        f"{repository_relative.as_posix()}"
+                    )
+                for relative_notice in REPOSITORY_CARGO_REQUIRED_NOTICES.get(name, ()):
+                    require_file(
+                        manifest.parent / relative_notice,
+                        f"Cargo path notice for {name}: {relative_notice.as_posix()}",
+                    )
             paths: list[pathlib.Path] = []
             if license_file_raw:
                 license_path = pathlib.Path(license_file_raw)
@@ -314,7 +332,18 @@ def cargo_components(
                     license_path = manifest.parent / license_path
                 paths.append(require_file(license_path, f"Cargo license for {name}"))
             if manifest.is_file():
-                paths.extend(path for path in notice_candidates(manifest.parent) if path not in paths)
+                paths.extend(
+                    path
+                    for path in notice_candidates(
+                        manifest.parent,
+                        exact_relative_paths=(
+                            REPOSITORY_CARGO_REQUIRED_NOTICES.get(name, frozenset())
+                            if repository_relative is not None
+                            else frozenset()
+                        ),
+                    )
+                    if path not in paths
+                )
             notices = tuple(
                 Notice(path.name, read_text(path, f"Cargo notice for {name}"))
                 for path in paths
@@ -331,7 +360,6 @@ def cargo_components(
                 if not inferred:
                     raise fail(f"Cargo package {name} license file is not identifiable")
                 license_declared = inferred
-            source = str(package.get("source") or "")
             metadata_checksum = str(package.get("checksum") or "").lower()
             if metadata_checksum and not re.fullmatch(
                 r"[0-9a-fA-F]{64}", metadata_checksum
@@ -356,6 +384,8 @@ def cargo_components(
             license_concluded = license_declared
             copyright_text = copyright_text_from_notices(notices)
             if not notices:
+                if repository_relative is not None:
+                    raise fail(f"Cargo path package {name} has no LICENSE or NOTICE file")
                 vetted, notices = vetted_notice_for_package(
                     repo_root,
                     name=name,
@@ -367,19 +397,43 @@ def cargo_components(
                 source_url = vetted.source_url
                 license_concluded = vetted.license_concluded
                 copyright_text = vetted.copyright_text
+            if repository_relative is not None:
+                source_root = normalized_url(arguments.source_url.rstrip("/"))
+                if "/tree/" not in urllib.parse.urlparse(source_root).path:
+                    source_root += (
+                        f"/tree/{urllib.parse.quote(arguments.source_revision, safe='')}"
+                    )
+                source_url = (
+                    f"{source_root}/"
+                    f"{urllib.parse.quote(repository_relative.as_posix(), safe='/')}"
+                )
             component = Component(
-                ecosystem="cargo",
+                ecosystem="cargo-path" if repository_relative is not None else "cargo",
                 name=name,
                 version=version,
                 license_declared=license_declared,
                 license_concluded=license_concluded,
                 source_url=source_url,
-                download_location=f"https://crates.io/api/v1/crates/{name}/{version}/download",
+                download_location=(
+                    "NOASSERTION"
+                    if repository_relative is not None
+                    else f"https://crates.io/api/v1/crates/{name}/{version}/download"
+                ),
                 relationship=roles[package_id],
                 checksum=checksum,
-                purl=f"pkg:cargo/{urllib.parse.quote(name)}@{urllib.parse.quote(version)}",
+                purl=(
+                    ""
+                    if repository_relative is not None
+                    else f"pkg:cargo/{urllib.parse.quote(name)}@{urllib.parse.quote(version)}"
+                ),
                 copyright_text=copyright_text,
-                summary=str(package.get("description") or ""),
+                summary=(
+                    "Repository-local modified Cargo path dependency at "
+                    f"{repository_relative.as_posix()}; based on upstream {name} "
+                    f"{version}."
+                    if repository_relative is not None
+                    else str(package.get("description") or "")
+                ),
                 notices=notices,
             )
             existing = components.get(component.key)
